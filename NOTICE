@@ -1,0 +1,11 @@
+FWR-Cam Library  
+Copyright (c) 2025 Framework Robotics GmbH  
+
+This software is provided under the terms of the BSD 3-Clause License
+(seeLICENSE file).  
+
+Third-party acknowledgments:  
+- magic_enum (https://github.com/Neargye/magic_enum), licensed under MIT License.  
+  Copyright (c) 2019 – present, Neargye.  
+
+No other third-party components used at this time.

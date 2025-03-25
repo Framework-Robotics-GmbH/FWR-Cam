@@ -1,0 +1,10 @@
+prefix=@CMAKE_INSTALL_PREFIX@
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: FWR-Cam_lnx
+Description: 3-clause-BSD-licensed camera abstraction library
+Version: @PROJECT_VERSION@
+Libs: -L${libdir} -lFWR_Cam_lnxLib
+Cflags: -I${includedir}

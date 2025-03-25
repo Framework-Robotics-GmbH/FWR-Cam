@@ -1,0 +1,17 @@
+//------------------------------------------------------------------------------
+// FWR-Cam Library
+// Copyright (c) 2025 Framework Robotics GmbH
+// 
+// Authors: Michael Lampert
+// 
+// Licensed under the BSD 3-Clause License.
+// You may use, modify, and redistribute this file under those terms.
+// 
+// See the LICENSE file in the project root for full license information.
+//------------------------------------------------------------------------------
+
+#pragma once
+
+#define FWR_FPBASE_VERSION "@PROJECT_VERSION@"
+#define FWR_FPBASE_VERSION_SUFFIX "@PROJECT_VERSION_SUFFIX@"
+#define FWR_FPBASE_FULL_VERSION "@FWR_FPBASE_FULL_VERSION@"

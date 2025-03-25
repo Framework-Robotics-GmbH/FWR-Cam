@@ -1,0 +1,22 @@
+# ------------------------------------------------------------------------------
+# FWR-Cam Library
+# Copyright (c) 2025 Framework Robotics GmbH
+# 
+# Authors: Michael Lampert
+# 
+# Licensed under the BSD 3-Clause License.
+# You may use, modify, and redistribute this file under those terms.
+# 
+# See the LICENSE file in the project root for full license information.
+# ------------------------------------------------------------------------------
+
+@PACKAGE_INIT@
+
+include("${CMAKE_CURRENT_LIST_DIR}/FWR_Cam_lnxTargets.cmake")
+
+# Provide version information to downstream consumers
+set(FWR_Cam_lnx_VERSION "@PROJECT_VERSION@")
+set(FWR_Cam_lnx_VERSION_SUFFIX "@PROJECT_VERSION_SUFFIX@")
+
+# Optionally, expose install prefix location
+set(FWR_Cam_lnx_INSTALL_PREFIX "${CMAKE_CURRENT_LIST_DIR}/../..")

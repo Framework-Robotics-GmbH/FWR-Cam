@@ -1,0 +1,41 @@
+name: Build and Release on version Tag
+
+on:
+  push:
+    tags:
+      - 'v*'  # Trigger on tags starting with 'v'
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up CMake
+        uses: lukka/get-cmake@latest
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+
+      - name: Configure project
+        run: cmake --preset=default
+
+      - name: Build and package
+        run: cmake --build --preset=default --target package
+
+      - name: Find generated tarball
+        id: find-tarball
+        run: |
+          FILE=$(find ./distrib -name "FWR-Cam_lnx-*.tar.gz" | head -n 1)
+          echo "tarball=$FILE" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          files: ${{ steps.find-tarball.outputs.tarball }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
