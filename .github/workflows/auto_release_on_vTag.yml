@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-22.04
     strategy:
       matrix:
-        arch: [native, rpi-armhf, rpi-aarch64]
+        arch: [native, rpi-aarch64]
 
     steps:
       - name: Checkout repository
@@ -20,14 +20,12 @@ jobs:
         uses: lukka/get-cmake@latest
 
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y build-essential gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libv4l-dev libusb-1.0-0-dev libudev-dev
+        run: sudo apt-get update && sudo apt-get install -y build-essential gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libv4l-dev libusb-1.0-0-dev libudev-dev
 
       - name: Configure project
         run: |
           if [ "${{ matrix.arch }}" = "native" ]; then
             cmake --preset=default
-          elif [ "${{ matrix.arch }}" = "rpi-armhf" ]; then
-            cmake --preset=rpi-armhf
           elif [ "${{ matrix.arch }}" = "rpi-aarch64" ]; then
             cmake --preset=rpi-aarch64
           fi
@@ -36,8 +34,6 @@ jobs:
         run: |
           if [ "${{ matrix.arch }}" = "native" ]; then
             cmake --build --preset=default --target package
-          elif [ "${{ matrix.arch }}" = "rpi-armhf" ]; then
-            cmake --build --preset=rpi-armhf --target package
           elif [ "${{ matrix.arch }}" = "rpi-aarch64" ]; then
             cmake --build --preset=rpi-aarch64 --target package
           fi

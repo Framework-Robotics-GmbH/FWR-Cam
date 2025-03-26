@@ -14,21 +14,6 @@
       }
     },
     {
-      "name": "rpi-armhf",
-      "description": "Cross-compile release build for Raspberry Pi (32-bit, hard-float)",
-      "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build-rpi-armhf",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_SYSTEM_NAME": "Linux",
-        "CMAKE_SYSTEM_PROCESSOR": "armv7",
-        "CMAKE_C_COMPILER": "arm-linux-gnueabihf-gcc",
-        "CMAKE_CXX_COMPILER": "arm-linux-gnueabihf-g++",
-        "CMAKE_INSTALL_PREFIX": "${sourceDir}/install-rpi-armhf",
-        "BUILD_SHARED_LIBS": "ON"
-      }
-    },
-    {
       "name": "rpi-aarch64",
       "description": "Cross-compile release build for Raspberry Pi (64-bit)",
       "generator": "Ninja",
@@ -49,11 +34,6 @@
       "name": "default",
       "description": "Build using Ninja in the configured build directory",
       "configurePreset": "default"
-    },
-    {
-      "name": "rpi-armhf",
-      "description": "Build for Raspberry Pi (32-bit) using Ninja",
-      "configurePreset": "rpi-armhf"
     },
     {
       "name": "rpi-aarch64",
