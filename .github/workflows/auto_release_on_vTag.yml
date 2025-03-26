@@ -6,8 +6,11 @@ on:
       - 'v*'  # Trigger on tags starting with 'v'
 
 jobs:
-  build-and-release:
+  build:
     runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        arch: [native, rpi-armhf, rpi-aarch64]
 
     steps:
       - name: Checkout repository
@@ -17,25 +20,60 @@ jobs:
         uses: lukka/get-cmake@latest
 
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y build-essential
+        run: sudo apt-get update && sudo apt-get install -y build-essential gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 
       - name: Configure project
-        run: cmake --preset=default
+        run: |
+          if [ "${{ matrix.arch }}" = "native" ]; then
+            cmake --preset=default
+          elif [ "${{ matrix.arch }}" = "rpi-armhf" ]; then
+            cmake --preset=rpi-armhf
+          elif [ "${{ matrix.arch }}" = "rpi-aarch64" ]; then
+            cmake --preset=rpi-aarch64
+          fi
 
       - name: Build and package
-        run: cmake --build --preset=default --target package
+        run: |
+          if [ "${{ matrix.arch }}" = "native" ]; then
+            cmake --build --preset=default --target package
+          elif [ "${{ matrix.arch }}" = "rpi-armhf" ]; then
+            cmake --build --preset=rpi-armhf --target package
+          elif [ "${{ matrix.arch }}" = "rpi-aarch64" ]; then
+            cmake --build --preset=rpi-aarch64 --target package
+          fi
 
       - name: Find generated tarball
         id: find-tarball
         run: |
-          FILE=$(find ./distrib -name "FWR-Cam_lnx-*.tar.gz" | head -n 1)
-          echo "tarball=$FILE" >> $GITHUB_OUTPUT
+          FILE=$(find ./distrib -name "*.tar.gz" | head -n 1)
+          ARCH_SUFFIX=${{ matrix.arch }}
+          ARCH_TARBALL="${FILE%.tar.gz}-${ARCH_SUFFIX}.tar.gz"
+          mv "$FILE" "$ARCH_TARBALL"
+          echo "tarball=$ARCH_TARBALL" >> $GITHUB_OUTPUT
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.arch }}-tarball
+          path: ${{ steps.find-tarball.outputs.tarball }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.ref_name }}
           name: Release ${{ github.ref_name }}
-          files: ${{ steps.find-tarball.outputs.tarball }}
+          files: ./artifacts/**/*.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
