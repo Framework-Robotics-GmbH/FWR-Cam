@@ -331,7 +331,7 @@ bool See3CAM_24CUG::sendHidCmd( uint8_t* outBuf
         struct timeval tv;
         fd_set rfds;
         FD_ZERO(&rfds);
-        FD_SET(*fd_ptr, &rfds);
+        FD_SET(static_cast<int>(*fd_ptr), &rfds);
         
         auto now = chrono::steady_clock::now();
         
