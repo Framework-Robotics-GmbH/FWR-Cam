@@ -13,7 +13,7 @@
 cmake_minimum_required(VERSION 3.19)
 
 # === Project Information & Licensing ===
-message(STATUS "FWR-Cam_lnx is proprietary software. See LICENSE file for terms.")
+message(STATUS "FWR-Cam_lnx is open-source software. See LICENSE file for details.")
 
 # Prevent in-source builds.
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
