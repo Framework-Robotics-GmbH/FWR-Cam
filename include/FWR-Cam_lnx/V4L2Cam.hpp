@@ -12,15 +12,19 @@
 
 #pragma once
 
+#include <array>
 #include <string>
 #include <string_view>
 #include <optional>
 #include <memory>
 #include <utility>
 #include <cstdint>    // For fixed-width integer types like uint8_t
+#include <sys/eventfd.h>
 #include <linux/videodev2.h>
 
-#include "libusb-1.0/libusb.h"
+#include <libusb-1.0/libusb.h>
+
+#include "FWR-Cam_lnx/util/SmallBitset.hpp"
 
 
 
@@ -34,68 +38,39 @@ namespace FWR::Cam_lnx
 {
 
 
-class V4L2Cam
+struct V4L2CamData
 {
-public   : enum class SettingSource : uint8_t { UNKNOWN, GIVEN, FETCHED };
-protected: using ssrc = SettingSource;
-    
-public:
-    enum class ErrorAction {
-        None,
-        StopStreaming,
-        ReopenDescriptors,
-        Reinitialize,
-        PowerCycle,
-        Uninitialize,
-        FreeMemory,
-        CheckPermissions,
-        CheckLogic
-    };
-    
-    bool locateDeviceNodeAndInitialize();
-    
-    bool startCapturing();
-    bool  stopCapturing();
-    bool    isCapturing() { return capturing; }
-    
-    // bool helper_init_cam( const char *devname
-    //                     , uint32_t width
-    //                     , uint32_t height
-    //                     , uint32_t format
-    //                     );
-    // 
-    // bool helper_deinit_cam();
-    // 
-    // bool helper_change_cam_res( uint32_t width
-    //                           , uint32_t height
-    //                           , uint32_t format
-    //                           );
-    // 
-    // bool helper_get_cam_frame( unsigned char** pointer_to_cam_data
-    //                          , int32_t* size
-    //                          );
-    // 
-    // bool helper_release_cam_frame();
-    
-    ErrorAction produceErrorAction() const { return errorAction; }
+    static constexpr uint8_t MAX_BUFFERS = 8;
+    static constexpr uint8_t MAX_PLANES  = 4;
     
     
-/**
- * Untested for misusages
+    enum class SettingSource : uint8_t { UNKNOWN, GIVEN, FETCHED };
+    enum class State         : uint8_t { UNINITIALIZED
+                                       , DEVICE_KNOWN
+                                       , INITIALIZED
+                                       , BUFFER_QUEUE_PREPPED
+                                       , STREAMING
+                                       , DEQUEUEING
+                                       };
+    enum class MemoryType    : uint8_t { UNKNOWN
+                                       , MMAP    // NIY
+                                       , USERPTR
+                                       , DMABUF
+                                       };
+    enum class APIToUse     : uint8_t { UNKNOWN, MULTI, SINGLE  };
     
-    bool helper_queryctrl( uint32_t id
-                         , v4l2_queryctrl* qctrl
-                         )
+    enum class ErrorAction { None
+                           , StopStreaming
+                           , ReopenDescriptors
+                           , Reinitialize
+                           , PowerCycle
+                           , Uninitialize
+                           , FreeMemory
+                           , CheckPermissions
+                           , CheckLogic
+                           };
     
-*/
-
-protected:
-    V4L2Cam( std::string_view const&  vendorID
-           , std::string_view const& productID
-           , std::string      const&  serialNo
-           );
-    virtual ~V4L2Cam();
-    
+    // file descriptor helper struct
     struct FD_t {
         FD_t() = default;
         explicit FD_t(int32_t fd) : value(fd) {}
@@ -129,67 +104,71 @@ protected:
         private:
             int32_t value{-1};
     };
-
-    int32_t xioctl( FD_t const&    fd
-                  , uint64_t       request
-                  , void*          arg
-                  , bool           quasi_blocking = true
-                  );
-    static int32_t xopen( char    const* pathname
-                        , int32_t const  flags
-                        );
     
-private:
-    virtual bool _locateDeviceNodeAndInitialize( udev       * uDev
-                                               , udev_device* parentDev
-                                               );
+    V4L2CamData(std::string const& serialNo) noexcept;
     
-    // only to be used by locateDeviceNodeAndInitialize()
-    void initializeSettings();
-    void resetCrop(FD_t const&);
-    bool determineMaxBufferSizeNeeded(FD_t const&);
-    void determineSettingDomains(FD_t const& fd);
-    void queryControlDomain(FD_t const& fd, uint32_t controlID, bool& domainKnown,
-                            int32_t& min, int32_t& max, int32_t& step);
     
-    std::shared_ptr<FD_t> produceV4L2FD();
-    bool                     openV4L2FD(); // locateDevice...() has that effect, too
-    void                    closeV4L2FD();
+    //       //
+    // state //
+    //       //
     
-    void uninitialize();
-    bool rebindUSBDevice();
-    bool powerCycleDevice();
-    bool produceHubHandleAndPortNumber( libusb_context* const     ctx
-                                      , libusb_device_handle*&    hub_handle
-                                      , libusb_device_descriptor& hub_desc
-                                      , uint8_t&                  port
-                                      );
+    std::string const serialNo;
     
-    virtual void _uninitialize() = 0;
+    // data members to forget on uninitialize - begin
+    std::string              v4l2Path{};
+    std::string              USBKernelName{};
+    std::string              USBBusNumber{};
+    std::string              USBDeviceAddress{};
+    std::shared_ptr<FD_t>    v4l2FD{};
+    std::shared_ptr<FD_t>    evntFD{};
     
-protected:
-    const std::string_view  vendorID;
-    const std::string_view productID;
-    const std::string       serialNo;
+    State                    state{State::UNINITIALIZED};
+    
+    uint8_t                  bufferCount{};
+    SmallBitset<MAX_BUFFERS> buffersQueued{};
+    // data members to forget on uninitialize - end
+    
+    MemoryType               memoryType{MemoryType::UNKNOWN};
+    APIToUse                 apiToUse{APIToUse::UNKNOWN};
+    
+    // lends it to user, when prepping user's v4l2_buffer
+    std::array< v4l2_plane
+              , MAX_PLANES > bufferPlanes{};
     
     // Error action flag and counters for severity promotion
     ErrorAction errorAction{ErrorAction::None};
     uint8_t     reopenDescriptorsCount{};
     uint8_t     reinitializationCount{};
     
-private:
-    // data members to forget on uninitialize - begin
-    std::string           v4l2Path{};
-    std::shared_ptr<FD_t> v4l2FD{};
-    std::string           USBKernelName{};
-    std::string           USBBusNumber{};
-    std::string           USBDeviceAddress{};
     
-    bool                  initialized{false};
-    bool                  initialized_newly{false};
-    // data members to forget on uninitialize - end
-    bool                  initialized_once{false}; // at least once
-    bool                  capturing{false};
+    //                           //
+    // settings domain knowledge //
+    //                           //
+    
+    // For now just documentation-ish
+    enum class PixelFormat : uint32_t {
+        RGB332 = ('R' | ('G' << 8) | ('B' << 16) | ('1' << 24)), // 'RGB1' in little-endian
+        RGB565 = ('R' | ('G' << 8) | ('B' << 16) | ('P' << 24)), // 'RGBP'
+        RGB24  = ('R' | ('G' << 8) | ('B' << 16) | ('3' << 24)), // 'RGB3'
+        RGB32  = ('R' | ('G' << 8) | ('B' << 16) | ('4' << 24)), // 'RGB4'
+        GREY   = ('G' | ('R' << 8) | ('E' << 16) | ('Y' << 24)), // 'GREY'
+        YUYV   = ('Y' | ('U' << 8) | ('Y' << 16) | ('V' << 24)), // 'YUYV'
+        UYVY   = ('U' | ('Y' << 8) | ('V' << 16) | ('Y' << 24)), // 'UYVY'
+        MJPEG  = ('M' | ('J' << 8) | ('P' << 16) | ('G' << 24)), // 'MJPG'
+        H264   = ('H' | ('2' << 8) | ('6' << 16) | ('4' << 24)), // 'H264'
+        NV12   = ('N' | ('V' << 8) | ('1' << 16) | ('2' << 24)), // 'NV12'
+        NV21   = ('N' | ('V' << 8) | ('2' << 16) | ('1' << 24)), // 'NV21'
+        YUV420 = ('Y' | ('U' << 8) | ('1' << 16) | ('2' << 24)), // 'YU12'
+        YVU420 = ('Y' | ('V' << 8) | ('1' << 16) | ('2' << 24))  // 'YV12'
+    };
+    
+    enum class PowerLineFrequency : uint8_t {
+        DISABLED  = 0, // Disable anti-flicker adjustment
+        FREQ_50HZ = 1, // Anti-flicker adjustment for 50 Hz
+        FREQ_60HZ = 2, // Anti-flicker adjustment for 60 Hz
+        AUTO      = 3  // Automatically detect and adjust
+    };
+    
     
     bool SUPPORTS__VIDIOC_TRY_FMT{};
     
@@ -229,15 +208,179 @@ private:
     int32_t EXPOSURE_MAX{};
     int32_t EXPOSURE_STEP{};
     
-    bool active;
-    struct buffer *buffers;
-    unsigned int n_buffers;
-    struct v4l2_buffer frame_buf;
+    
+    //                 //
+    // settings valeus //
+    //                 //
+    
+    std::optional<uint32_t>     maxBufferSizeNeeded{};
+    std::optional<uint32_t> currentBufferSizeNeeded{};
+    
+    SettingSource                     resolutionSource{};
+    std::optional<uint32_t>           width {};
+    std::optional<uint32_t>           height{};
+    
+    SettingSource                     pixelFormatSource{};
+    std::optional<PixelFormat>        pixelFormat{};
+    
+    
+    SettingSource                     brightnessSource{};
+    std::optional<int32_t>            brightness{};
+    
+    SettingSource                     contrastSource{};
+    std::optional<int32_t>            contrast{};
+    
+    SettingSource                     saturationSource{};
+    std::optional<int32_t>            saturation{};
+    
+    SettingSource                     sharpnessSource{};
+    std::optional<int32_t>            sharpness{};
+    
+    SettingSource                     gammaSource{};
+    std::optional<int32_t>            gamma{};
+    
+    SettingSource                     whiteBalanceSource{};
+    std::optional<int32_t>            whiteBalance{};
+    
+    SettingSource                     gainSource{};
+    std::optional<int32_t>            gain{};
+    
+    SettingSource                     powerLineFrequencySource{};
+    std::optional<PowerLineFrequency> powerLineFrequency{};
+    
+    SettingSource                     exposureSource{};
+    std::optional<int32_t>            exposure{};
+    
+}; // struct V4L2CamData
+
+
+
+
+class V4L2Cam
+ :  protected V4L2CamData
+{
+    // in this class there should be no data members other than the inherited
+    
+protected:
+    using ssrc = SettingSource;
     
 public:
-    //                //
-    // settings stuff //
-    //                //
+    // mind the declaration order of the following set of functions *hint* *hint* *wink*
+    
+    bool locateDeviceNodeAndInitialize();
+    
+    bool usingMemoryType(MemoryType) noexcept;
+    
+    bool requestBufferQueue(uint32_t count) noexcept;
+    
+    bool produceUnqueuedMask(decltype(V4L2CamData::buffersQueued)&) const noexcept;
+    bool  prepBuffer(v4l2_buffer&) noexcept; // nulls, then sets .type and .memory
+                                             // and .m.planes as necessary
+    bool queueBuffer(v4l2_buffer&) noexcept; // you're expected to have set the
+                                             // index correctly, too
+    
+    bool startStreaming() noexcept;
+    bool    isStreaming() noexcept { return state == State::STREAMING; }
+    bool  fillBuffer   (v4l2_buffer&) noexcept; // nulls and preps the arg, then blocks for a frame
+    bool           wake()             noexcept; // to interrupt fillBuffer
+    bool  stopStreaming() noexcept;
+    
+    bool releaseBufferQueue() noexcept;
+    
+    
+    inline // for when you got false for requestBufferQueue
+    size_t produceActualQueueSize() const noexcept {return bufferCount; }
+    
+    ErrorAction produceErrorAction() const { return errorAction; }
+    
+    // bool helper_init_cam( const char *devname
+    //                     , uint32_t width
+    //                     , uint32_t height
+    //                     , uint32_t format
+    //                     );
+    // 
+    // bool helper_deinit_cam();
+    // 
+    // bool helper_change_cam_res( uint32_t width
+    //                           , uint32_t height
+    //                           , uint32_t format
+    //                           );
+    // 
+    // bool helper_get_cam_frame( unsigned char** pointer_to_cam_data
+    //                          , int32_t* size
+    //                          );
+    // 
+    // bool helper_release_cam_frame();
+    
+    
+/**
+ * Untested for misusages
+    
+    bool helper_queryctrl( uint32_t id
+                         , v4l2_queryctrl* qctrl
+                         )
+    
+*/
+
+protected:
+    V4L2Cam(std::string const& serialNo) noexcept;
+    virtual ~V4L2Cam();
+
+    V4L2Cam           (V4L2Cam const& ) = delete;
+    V4L2Cam& operator=(V4L2Cam const& ) = delete;
+    V4L2Cam           (V4L2Cam      &&) = delete;
+    V4L2Cam& operator=(V4L2Cam      &&) = delete;
+    
+
+    int32_t xioctl( FD_t const& fd
+                  , uint64_t    request
+                  , void*       arg
+                  , bool        quasi_blocking = false
+                  );
+    static int32_t xopen( char    const* pathname
+                        , int32_t const  flags
+                        );
+    
+private:
+    virtual std::string_view const& _produceVendorID () noexcept = 0;
+    virtual std::string_view const& _produceProductID() noexcept = 0;
+    
+    virtual bool _locateDeviceNodeAndInitialize( udev       * uDev
+                                               , udev_device* parentDev
+                                               );
+    
+    // only to be used by locateDeviceNodeAndInitialize()
+    void initializeSettings();
+    void    reapplySettings();
+    
+    void resetCrop(FD_t const&);
+    // bool isMemoryTypeSupported(FD_t const&, v4l2_buf_type, v4l2_memory);
+    bool determineMaxBufferSizeNeeded(FD_t const&);
+    void determineSettingDomains(FD_t const& fd);
+    void queryControlDomain(FD_t const& fd, uint32_t controlID, bool& domainKnown,
+                            int32_t& min, int32_t& max, int32_t& step);
+    
+    std::shared_ptr<FD_t> produceV4L2FD();
+    bool                     openV4L2FD(); // locateDevice...() has that effect, too
+    void                    closeV4L2FD();
+    
+    void uninitialize();
+    bool rebindUSBDevice();
+    bool powerCycleDevice();
+    bool produceHubHandleAndPortNumber( libusb_context* const     ctx
+                                      , libusb_device_handle*&    hub_handle
+                                      , libusb_device_descriptor& hub_desc
+                                      , uint8_t&                  port
+                                      );
+    
+    virtual void _uninitialize() = 0;
+    
+    
+    bool decideBufferType(uint32_t& bufType) noexcept;
+    bool decideMemoryType(uint32_t& memType) noexcept;
+    
+    
+    // settings helpers //
     
     bool fetch_control_value( std::shared_ptr<FD_t> fd_ptr
                             , uint32_t              id
@@ -248,6 +391,13 @@ public:
                             , int32_t const         value
                             );
     
+    
+    //                 //
+    // settings values //
+    //                 //
+    
+public:
+    std::optional<v4l2_format> giveV4L2Format();
     
     ssrc  tellResolutionSource() { return resolutionSource; }
     bool  giveResolution(uint32_t &     width, uint32_t &     height);
@@ -344,72 +494,14 @@ private:
     bool checkExposure(int32_t const exposure);
     bool checkExposure();
     
-public:
-    // For now just documentation-ish
-    enum class PixelFormat : uint32_t {
-        RGB332 = ('R' | ('G' << 8) | ('B' << 16) | ('1' << 24)), // 'RGB1' in little-endian
-        RGB565 = ('R' | ('G' << 8) | ('B' << 16) | ('P' << 24)), // 'RGBP'
-        RGB24  = ('R' | ('G' << 8) | ('B' << 16) | ('3' << 24)), // 'RGB3'
-        RGB32  = ('R' | ('G' << 8) | ('B' << 16) | ('4' << 24)), // 'RGB4'
-        GREY   = ('G' | ('R' << 8) | ('E' << 16) | ('Y' << 24)), // 'GREY'
-        YUYV   = ('Y' | ('U' << 8) | ('Y' << 16) | ('V' << 24)), // 'YUYV'
-        UYVY   = ('U' | ('Y' << 8) | ('V' << 16) | ('Y' << 24)), // 'UYVY'
-        MJPEG  = ('M' | ('J' << 8) | ('P' << 16) | ('G' << 24)), // 'MJPG'
-        H264   = ('H' | ('2' << 8) | ('6' << 16) | ('4' << 24)), // 'H264'
-        NV12   = ('N' | ('V' << 8) | ('1' << 16) | ('2' << 24)), // 'NV12'
-        NV21   = ('N' | ('V' << 8) | ('2' << 16) | ('1' << 24)), // 'NV21'
-        YUV420 = ('Y' | ('U' << 8) | ('1' << 16) | ('2' << 24)), // 'YU12'
-        YVU420 = ('Y' | ('V' << 8) | ('1' << 16) | ('2' << 24))  // 'YV12'
-    };
-    
-    enum class PowerLineFrequency : uint8_t {
-        DISABLED  = 0, // Disable anti-flicker adjustment
-        FREQ_50HZ = 1, // Anti-flicker adjustment for 50 Hz
-        FREQ_60HZ = 2, // Anti-flicker adjustment for 60 Hz
-        AUTO      = 3  // Automatically detect and adjust
-    };
-    
-protected:
-    std::optional<uint32_t>     maxBufferSizeNeeded{};
-    // data members to forget on uninitialize - begin
-    std::optional<uint32_t> currentBufferSizeNeeded{};
-    
-    SettingSource                     resolutionSource{};
-    std::optional<uint32_t>           width {};
-    std::optional<uint32_t>           height{};
-    
-    SettingSource                     pixelFormatSource{};
-    std::optional<PixelFormat>        pixelFormat{};
-    
-    
-    SettingSource                     brightnessSource{};
-    std::optional<int32_t>            brightness{};
-    
-    SettingSource                     contrastSource{};
-    std::optional<int32_t>            contrast{};
-    
-    SettingSource                     saturationSource{};
-    std::optional<int32_t>            saturation{};
-    
-    SettingSource                     sharpnessSource{};
-    std::optional<int32_t>            sharpness{};
-    
-    SettingSource                     gammaSource{};
-    std::optional<int32_t>            gamma{};
-    
-    SettingSource                     whiteBalanceSource{};
-    std::optional<int32_t>            whiteBalance{};
-    
-    SettingSource                     gainSource{};
-    std::optional<int32_t>            gain{};
-    
-    SettingSource                     powerLineFrequencySource{};
-    std::optional<PowerLineFrequency> powerLineFrequency{};
-    
-    SettingSource                     exposureSource{};
-    std::optional<int32_t>            exposure{};
-    // data members to forget on uninitialize - end
-};
+}; // class V4L2Cam
+
+
+template<class M>
+concept V4L2CamModel_c
+ =      std::derived_from <M, V4L2Cam>
+    && !std::same_as      <M, V4L2Cam>
+    && !std::is_abstract_v<M>;
 
 
 } // namespace FWR::Cam_lnx

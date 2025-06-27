@@ -68,10 +68,24 @@ class See3CAM_24CUG
  :  public V4L2Cam
 {
 public:
-    using V4L2Cam::V4L2Cam;
+    See3CAM_24CUG(std::string const& serialNo) noexcept;
     ~See3CAM_24CUG();
+
+    See3CAM_24CUG           (See3CAM_24CUG const& ) = delete;
+    See3CAM_24CUG& operator=(See3CAM_24CUG const& ) = delete;
+    See3CAM_24CUG           (See3CAM_24CUG      &&) = delete;
+    See3CAM_24CUG& operator=(See3CAM_24CUG      &&) = delete;
+    
+    
+    static std::string_view const& produceVendorID () noexcept;
+    static std::string_view const& produceProductID() noexcept;
     
 private:
+    inline virtual std::string_view const& _produceVendorID () noexcept override
+    {                                return produceVendorID ();                }
+    inline virtual std::string_view const& _produceProductID() noexcept override
+    {                                return produceProductID();                }
+    
     virtual bool _locateDeviceNodeAndInitialize( udev       * uDev
                                                , udev_device* parentDev
                                                ) override;
@@ -318,6 +332,8 @@ private:
     unsigned char  g_in_packet_buf[BUFFER_LENGTH];
     
     // data members to forget on uninitialize
+    bool initialized{false};
+    
     std::string           hidPath{};
     std::shared_ptr<FD_t> hidFD{};
     

@@ -12,23 +12,25 @@
 
 #include "FWR-Cam_lnx/V4L2Cam.hpp"
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+// #include <stdio.h>
+// #include <stdlib.h>
+// #include <string.h>
 #include <iostream>
 #include <fstream>
 #include <thread>
+#include <cstring>
 
 #include <fcntl.h> /* low-level i/o */
-#include <unistd.h>
+// #include <unistd.h>
 #include <errno.h>
+#include <poll.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/time.h>
 #include <sys/mman.h>
 #include <sys/ioctl.h>
 #include <linux/videodev2.h>
-#include <stdbool.h>
+// #include <stdbool.h>
 
 #include <libudev.h>    // For udev functions and structures
 
@@ -46,15 +48,66 @@ using namespace std;
 using namespace magic_enum;
 
 
-struct buffer
-{
-    void *start;
-    size_t length;
-};
+// struct buffer
+// {
+//     void *start;
+//     size_t length;
+// };
 
-bool V4L2Cam::locateDeviceNodeAndInitialize() {
-    if ( initialized )
-        clog << "already initialized. no extrawurst!" << endl;
+
+V4L2CamData::V4L2CamData(std::string const& sNo) noexcept
+ :  serialNo(sNo)
+ ,  evntFD(make_shared<FD_t>(eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC)))
+{
+    if ( !evntFD ) [[unlikely]]
+        clog << "V4L2CamData::V4L2CamData: Failed to create eventfd!!!"
+             << endl;
+}
+
+
+void V4L2CamData::FD_t::close_fd()
+{
+    constexpr int32_t retry_count = 10;
+    int32_t delay_ms = 1;
+    
+    int32_t result;
+    
+    for ( int32_t attempt = 0; attempt < retry_count; ++attempt )
+    {
+        errno = 0;
+        
+        result = ::close(value);
+        
+        if ( result == 0 )
+            return;
+        
+        if ( errno == EINTR ) {
+            if ( attempt < retry_count - 1 )
+            {
+                this_thread::sleep_for(chrono::milliseconds(delay_ms++));
+                continue;
+            } else
+                return;
+        } else
+            return;
+    }
+}
+
+
+bool V4L2Cam::locateDeviceNodeAndInitialize()
+{
+    if (    state != State::INITIALIZED
+         && state != State::DEVICE_KNOWN
+       ) [[unlikely]]
+    {
+        clog << "V4L2Cam::locateDeviceNodeAndInitialize: already initialized. "
+                "no extrawurst!"
+             << endl;
+        return true;
+    }
+    
+    string_view const&  vendorID = _produceVendorID ();
+    string_view const& productID = _produceProductID();
     
     bool   product_found{false};
     bool    serial_found{false};
@@ -62,14 +115,21 @@ bool V4L2Cam::locateDeviceNodeAndInitialize() {
     bool streaming_found{false};
     
     udev* uDev = udev_new();
-    if ( !uDev ) [[unlikely]] {
-        clog << "udev does not work" << endl;
+    if ( !uDev ) [[unlikely]]
+    {
+        clog << "V4L2Cam::locateDeviceNodeAndInitialize: udev does not work"
+             << endl;
+        
         return false;
     }
     
     udev_enumerate* enumerate = udev_enumerate_new(uDev);
-    if ( !enumerate ) {
-        clog << "udev_enumerate_new failed" << endl;
+    if ( !enumerate )
+    {
+        clog << "V4L2Cam::locateDeviceNodeAndInitialize: udev_enumerate_new "
+                "failed"
+             << endl;
+        
         udev_unref(uDev);
         return false;
     }
@@ -83,55 +143,72 @@ bool V4L2Cam::locateDeviceNodeAndInitialize() {
     udev_list_entry* dev_list_entry;
     udev_list_entry_foreach(dev_list_entry, devices)
     {
-        if ( dev ) udev_device_unref(dev);
+        if ( dev )
+            udev_device_unref(dev);
         
         const char *path = udev_list_entry_get_name(dev_list_entry);
-        if ( !path ) [[unlikely]] continue;
+        if ( !path ) [[unlikely]]
+            continue;
         
         dev = udev_device_new_from_syspath(uDev, path);
-        if ( !dev ) continue;
+        if ( !dev )
+            continue;
         
         udev_device* pdev = udev_device_get_parent_with_subsystem_devtype
                             (dev, "usb", "usb_device");
-        if ( !pdev ) continue;
+        if ( !pdev )
+            continue;
         
         const char *vendor  = udev_device_get_sysattr_value(pdev, "idVendor");
         const char *product = udev_device_get_sysattr_value(pdev, "idProduct");
-        if (                 !vendor ||              !product
-             ||  vendorID !=  vendor || productID !=  product
-           ) continue;
+        if (                !vendor ||              !product
+             || vendorID !=  vendor || productID !=  product
+           )
+            continue;
         
         product_found = true;
         
         const char *sn = udev_device_get_sysattr_value(pdev, "serial");
-        if ( !sn || serialNo != sn ) continue;
+        if ( !sn || serialNo != sn )
+            continue;
         
         serial_found = true;
         
         char const* dev_path = udev_device_get_devnode(dev);
-        if ( !dev_path ) continue;
+        if ( !dev_path )
+            continue;
         
         FD_t fd{xopen(dev_path, O_RDWR | O_NONBLOCK)};
-        if ( fd < 0 ) {
-            clog << "Could not open v4l2 device path" << endl;
+        if ( !fd )
+        {
+            clog << "V4L2Cam::locateDeviceNodeAndInitialize: Could not open "
+                    "v4l2 device path! "
+                 << strerror(errno) << endl;
+            
             continue;
         }
         
         v4l2_capability cap{};
-        if ( !xioctl(fd, VIDIOC_QUERYCAP, &cap) ) {
-            clog << "VIDIOC_QUERYCAP failed" << endl;
+        if ( !xioctl(fd, VIDIOC_QUERYCAP, &cap) )
+        {
+            clog << "V4L2Cam::locateDeviceNodeAndInitialize: VIDIOC_QUERYCAP "
+                    "failed! "
+                 << strerror(errno) << endl;
+            
             continue;
         }
         
         if ( !(   cap.capabilities
                 & V4L2_CAP_VIDEO_CAPTURE )
-           ) continue;
+           )
+            continue;
         
         capture_found = true;
         
         if ( !(   cap.capabilities
                 & V4L2_CAP_STREAMING )
-           ) continue;
+           )
+            continue;
         
         streaming_found = true;
         
@@ -153,63 +230,605 @@ bool V4L2Cam::locateDeviceNodeAndInitialize() {
             
             resetCrop(fd);
             
-            if ( !initialized_once )
+            v4l2FD = make_shared<FD_t>(move(fd));
+            
+            if ( state == State::UNINITIALIZED )
             {
                 determineSettingDomains(fd);
                 determineMaxBufferSizeNeeded(fd);
-                fd.close_fd();
-                openV4L2FD();
-                initialized_once  = true;
+                
+                initializeSettings();
+                
+                state = State::DEVICE_KNOWN;
             }
-            else
-                v4l2FD = make_shared<FD_t>(move(fd));
+            else /* state == State::DEVICE_KNOWN */
+                reapplySettings();
             
-            initializeSettings();
-            
-            initialized       = true;
-            initialized_newly = true;
+            state = State::INITIALIZED;
         }
         
         break;
     }
-    if ( dev ) udev_device_unref(dev);
+    if ( dev )
+        udev_device_unref(dev);
     
     udev_enumerate_unref(enumerate);
     udev_unref(uDev);
     
-    if ( !initialized ) {
+    if ( state != State::INITIALIZED )
+    {
         if ( !product_found )
-            clog << "Could not find product w/ vendor ID: " <<  vendorID
-                 <<                     " and product ID: " << productID << endl;
+            clog << "V4L2Cam::locateDeviceNodeAndInitialize: Could not find "
+                    "product w/ vendor ID: " <<  vendorID <<
+                    " and product ID: "      << productID
+                 << endl;
         else if ( !serial_found )
-            clog << "Found correct product(s), but not serial No: " << serialNo
+            clog << "V4L2Cam::locateDeviceNodeAndInitialize: Found correct "
+                    "product(s), but not serial No: " << serialNo
                  << endl;
         else if ( !capture_found )
-            clog << "Found correct product and serial No"
-                    ", but no video capture device node" << endl;
+            clog << "V4L2Cam::locateDeviceNodeAndInitialize: Found correct "
+                    "product and serial No, but no video capture device node"
+                 << endl;
         else if ( !streaming_found )
-            clog << "Found correct product, serial No, and video capture device"
-                    " node, but does not support streaming i/o" << endl;
+            clog << "V4L2Cam::locateDeviceNodeAndInitialize: Found correct "
+                    "product, serial No, and video capture device node, but "
+                    "does not support streaming i/o"
+                 << endl;
         else
-            clog << "Found correct product, serial No, and video capture device"
-                    " node supporting streaming i/o"
-                    ", but could not fully initialize" << endl;
+            clog << "V4L2Cam::locateDeviceNodeAndInitialize: Found correct "
+                    "product, serial No, and video capture device node "
+                    "supporting streaming i/o, but could not fully initialize"
+                 << endl;
     }
     
-    return initialized;
+    return state == State::INITIALIZED;
 }
 
-void V4L2Cam::initializeSettings() {
-    fetchResolutionAndPixelFormat();
-    fetchBrightness();
-    fetchContrast();
-    fetchSaturation();
-    fetchSharpness();
-    fetchGamma();
-    fetchWhiteBalance();
-    fetchGain();
-    fetchPowerLineFrequency();
-    fetchExposure();
+
+bool V4L2Cam::usingMemoryType(MemoryType mt) noexcept
+{
+    if (    state != State::UNINITIALIZED
+         && state != State::DEVICE_KNOWN
+         && state != State::INITIALIZED
+       ) [[unlikely]]
+    {
+        clog << "V4L2Cam::usingMemoryType: not in a correct state "
+                "(UNINITIALIZED|DEVICE_KNOWN|INITIALIZED) to set or change the "
+                "memory type to use (for buffers)!"
+             << endl;
+        
+        return false;
+    }
+    
+    if (    mt == MemoryType::UNKNOWN
+         || mt == MemoryType::MMAP
+       ) [[unlikely]]
+    {
+        memoryType = MemoryType::UNKNOWN;
+        
+        clog << "V4L2Cam::usingMemoryType: user-given memory type not supported. "
+                "Reset to UNKNOWN, internally!"
+             << endl;
+        
+        return false;
+    }
+    
+    
+    memoryType = mt;
+    
+    return true;
+}
+
+
+bool V4L2Cam::requestBufferQueue(uint32_t count) noexcept
+{
+    auto fd_ptr = produceV4L2FD();
+    
+    if ( !fd_ptr || !*fd_ptr ) [[unlikely]]
+        return false;
+    
+    if ( state != State::INITIALIZED ) [[unlikely]]
+    {
+        clog << "V4L2Cam::requestBufferQueue: not in the correct state "
+                "(INITIALIZED) to prep a v4l2 buffer queue!"
+             << endl;
+        
+        return false;
+    }
+    
+    
+    uint32_t bufType{};
+    uint32_t memType{};
+    
+    
+    if (    !decideBufferType(bufType)
+         || !bufType
+       ) [[unlikely]]
+    {
+        clog << "V4L2Cam::requestBufferQueue: could not decide v4l2 buffer type!"
+             << endl;
+        
+        return false;
+    }
+    
+    if (    !decideMemoryType(memType)
+         || !memType
+       ) [[unlikely]]
+    {
+        clog << "V4L2Cam::requestBufferQueue: memory type to use unknown!"
+             << endl;
+        
+        return false;
+    }
+    
+    
+    v4l2_requestbuffers req = { .count  = count
+                              , .type   = bufType
+                              , .memory = memType
+                              , .capabilities{}
+                              , .flags{}
+                              , .reserved{}
+                              };
+    
+    if (! xioctl(*fd_ptr, VIDIOC_REQBUFS, &req) ) [[unlikely]]
+    {
+        clog << "V4L2Cam::requestBufferQueue: Could not have the device prepare "
+                "a buffer queue for " << count << " buffers! "
+             << strerror(errno) << endl;
+        
+        return false;
+    }
+    
+    bufferCount = req.count;
+    buffersQueued.clear();
+    state       = State::BUFFER_QUEUE_PREPPED;
+        
+    return count == req.count; // TODO do sth. more explicit?
+}
+
+
+bool V4L2Cam::produceUnqueuedMask(decltype(V4L2CamData::buffersQueued)& mask) const noexcept
+{
+    if (    state != State::BUFFER_QUEUE_PREPPED
+         && state != State::STREAMING
+       ) [[unlikely]]
+    {
+        clog << "V4L2Cam::produceUnqueuedMask: not in a correct state "
+                "(BUFFER_QUEUE_PREPPED|STREAMING) - there's no queue for buffers "
+                "to not be queued in!"
+             << endl;
+        
+        return false;
+    }
+    
+    
+    using value_t = decltype(buffersQueued)::value_t;
+    
+    size_t m = buffersQueued.raw();
+    
+    m = ~m
+      &  ((size_t{1} << bufferCount) - 1);
+    
+    mask.raw(static_cast<value_t>(m));
+    
+    return true;
+}
+
+bool V4L2Cam::prepBuffer(v4l2_buffer& buf) noexcept
+{
+    if (    state != State::BUFFER_QUEUE_PREPPED
+         && state != State::STREAMING
+       ) [[unlikely]]
+    {
+        clog << "V4L2Cam::prepBuffer: not in a correct state "
+                "(BUFFER_QUEUE_PREPPED|STREAMING) to prep a buffer descriptor!"
+             << endl;
+        
+        return false;
+    }
+    
+    
+    uint32_t bufType{};
+    uint32_t memType{};
+    
+    
+    if (    !decideBufferType(bufType)
+         || !bufType
+       ) [[unlikely]]
+    {
+        clog << "V4L2Cam::prepBuffer: could not decide v4l2 buffer type!"
+             << endl;
+        
+        return false;
+    }
+    
+    if (    !decideMemoryType(memType)
+         || !memType
+       ) [[unlikely]]
+    {
+        clog << "V4L2Cam::prepBuffer: memory type to use unknown!"
+             << endl;
+        
+        return false;
+    }
+    
+    
+    buf = {};
+    
+    buf.type   = bufType;
+    buf.memory = memType;
+    
+    if ( apiToUse == APIToUse::MULTI )
+    {
+        bufferPlanes = {};
+        buf.m.planes = bufferPlanes.data();
+        buf.length   = bufferPlanes.size();
+    }
+    
+    return true;
+}
+
+
+bool V4L2Cam::queueBuffer(v4l2_buffer& buf) noexcept
+{
+    shared_ptr<FD_t> fd_ptr = produceV4L2FD();
+    
+    if ( !fd_ptr || !*fd_ptr ) [[unlikely]]
+        return false;
+    
+    
+    if (    state != State::BUFFER_QUEUE_PREPPED
+         && state != State::STREAMING
+       ) [[unlikely]]
+    {
+        clog << "V4L2Cam::queueBuffer: not in a correct state "
+                "(BUFFER_QUEUE_PREPPED|STREAMING) to queue buffers!"
+             << endl;
+        
+        return false;
+    }
+    
+    
+    if ( buf.index >= bufferCount ) [[unlikely]]
+    {
+        clog << "V4L2Cam::queueBuffer: given buffer has out-of-bounds index!!!"
+             << endl;
+        
+        return false;
+    }
+    
+    
+    if ( buffersQueued.test(buf.index) ) [[unlikely]]
+        clog << "V4L2Cam::queueBuffer: given buffer queued, but there's already "
+                "one queued for that index! (I'll try to queue it anyway. "
+                "Wanna see what happens.)"
+             << endl;
+    
+    
+    if ( !xioctl(*fd_ptr, VIDIOC_QBUF, &buf) ) [[unlikely]]
+    {
+        clog << "V4L2Cam::queueBuffer: could not queue buffer! "
+             << strerror(errno) << endl;
+        
+        return false;
+    }
+    
+    buffersQueued.set(buf.index);
+    
+    return true;
+}
+
+
+bool V4L2Cam::startStreaming() noexcept
+{
+    shared_ptr<FD_t> fd_ptr = produceV4L2FD();
+    
+    if ( !fd_ptr || !*fd_ptr ) [[unlikely]]
+        return false;
+    
+    
+    if ( state != State::BUFFER_QUEUE_PREPPED ) [[unlikely]]
+    {
+        clog << "V4L2Cam::startStreaming: not in the correct state "
+                "(BUFFER_QUEUE_PREPPED) to start streaming!"
+             << endl;
+        
+        return false;
+    }
+    
+    if ( buffersQueued.count() < bufferCount ) [[unlikely]]
+    {
+        clog << "V4L2Cam::startStreaming: user hasn't filled the buffer queue to "
+                "the brim. I cannot work like that!"
+             << endl;
+        
+        return false;
+    }
+    
+    
+    uint32_t bufType{};
+    
+    if (    !decideBufferType(bufType)
+         || !bufType
+       ) [[unlikely]]
+    {
+        clog << "V4L2Cam::requestBufferQueue: could not decide v4l2 buffer type!"
+             << endl;
+        
+        return false;
+    }
+
+    
+    if ( !xioctl(*fd_ptr, VIDIOC_STREAMON, &bufType) )
+    {
+        clog << "V4L2Cam::startCapturing: couldn't start streaming! "
+             << strerror(errno) << endl;
+        
+        return false;
+    }
+    
+    state = State::STREAMING;
+    
+    return true;
+}
+
+bool V4L2Cam::fillBuffer(v4l2_buffer& buf) noexcept
+{
+    shared_ptr<FD_t> fd_ptr = produceV4L2FD();
+    
+    if ( !fd_ptr || !*fd_ptr ) [[unlikely]]
+        return false;
+    
+    
+    if ( state != State::STREAMING ) [[unlikely]]
+    {
+        clog << "V4L2Cam::fillBuffer: not in the correct state "
+                "(STREAMING) to try to fetch a frame!"
+             << endl;
+        
+        return false;
+    }
+    
+    
+    state = State::DEQUEUEING;
+    
+    
+    pollfd fds[2];
+    fds[0].fd     = *fd_ptr;
+    fds[0].events = POLLIN;
+    
+    if (evntFD) {
+        fds[1].fd     = *evntFD;
+        fds[1].events = POLLIN;
+    }
+    
+    
+    while ( true )
+    {
+        int ret = poll(fds, evntFD ? 2 : 1, -1);
+        
+        if ( ret == -1 ) [[unlikely]]
+        {
+            if ( errno == EINTR ) [[  likely]]
+                continue;
+            
+            clog << "V4L2Cam::fillBuffer: poll errored out! "
+                 << strerror(errno) << endl;
+            
+            state = State::STREAMING;
+            
+            return false;
+        }
+        
+        if ( fds[1].revents & POLLIN ) [[unlikely]]
+        {
+            uint64_t dummy;
+            read(*evntFD, &dummy, sizeof(dummy));
+            
+            clog << "V4L2Cam::fillBuffer: so. wrote to my eventfd to wake me!?"
+                 << endl;
+        }
+        
+        if ( !( fds[0].revents & POLLIN ) ) [[unlikely]]
+        {
+            state = State::STREAMING;
+            
+            return false;
+        }
+        else
+            break;
+    }
+        
+    
+    buf = {};
+    
+    if ( !prepBuffer(buf) ) [[unlikely]]
+        clog << "V4L2Cam::fillBuffer: sth. went wrong prepping the "
+                "v4l2_buffer structure for the fetch. Will try anyways. Might "
+                "work."
+             << endl;
+    
+    bool succ = xioctl(*fd_ptr, VIDIOC_DQBUF, &buf);
+    
+    state = State::STREAMING;
+    
+    if ( !succ ) [[unlikely]]
+    {
+        clog << "V4L2Cam::fillBuffer: dequeueing a buffer with a framedidn't work! "
+             << strerror(errno) << endl;
+        
+        return false;
+    }
+    
+    
+    if ( buf.index >= bufferCount ) [[unlikely]]
+    {
+        clog << "V4L2Cam::fillBuffer: retrieved buffer has out-of-bounds index!!!"
+             << endl;
+        
+        return false;
+    }
+    
+    
+    buffersQueued.reset(buf.index);
+    
+    return true;
+}
+
+bool V4L2Cam::wake() noexcept
+{
+    if ( !evntFD ) [[unlikely]]
+    {
+        clog << "V4L2Cam::wake: there's no valid eventfd!!!"
+             << endl;
+        
+        return false;
+    }
+    
+    
+    if (    state != State::STREAMING
+         && state != State::DEQUEUEING
+       ) [[unlikely]]
+    {
+        clog << "V4L2Cam::wake: not in the correct state "
+                "(STREAMING|DEQUEUEING) to wake the one in fillBuffer()!"
+             << endl;
+        
+        return false;
+    }
+    
+    
+    uint64_t one = 1;
+    write(*evntFD, &one, sizeof(one));
+    
+    return true;
+}
+
+bool V4L2Cam::stopStreaming() noexcept
+{
+    shared_ptr<FD_t> fd_ptr = produceV4L2FD();
+    
+    if ( !fd_ptr || !*fd_ptr ) [[unlikely]]
+        return false;
+    
+    
+    if ( state != State::STREAMING ) [[unlikely]]
+    {
+        clog << "V4L2Cam::stopStreaming: not in the correct state "
+                "(STREAMING) to stop streaming!"
+             << endl;
+        
+        return false;
+    }
+    
+    
+    v4l2_buffer buf{};
+    
+    if ( !prepBuffer(buf) ) [[unlikely]]
+    {
+        clog << "V4L2Cam::stopStreaming: sth. went wrong prepping the "
+                "v4l2_buffer structure for dequeueing whatever's left to dequeue!"
+             << endl;
+        
+        // let's not return, but still try to dequeue
+    }
+    
+    
+    if ( !xioctl(*fd_ptr, VIDIOC_STREAMOFF, &buf.type) ) [[unlikely]]
+    {
+        clog << "V4L2Cam::stopStreaming: operation failed! "
+             << strerror(errno) << endl;
+        
+        return false;
+    }
+    
+    while ( xioctl(*fd_ptr, VIDIOC_DQBUF, &buf) )
+    {
+        if ( buf.index >= bufferCount ) [[unlikely]]
+            clog << "V4L2Cam::stopStreaming: retrieved buffer has out-of-bounds "
+                    "index!!!"
+                 << endl;
+        else
+            buffersQueued.reset(buf.index);
+        
+        prepBuffer(buf);
+    }
+    
+    
+    state = State::BUFFER_QUEUE_PREPPED;
+    
+    return true;
+}
+
+
+bool V4L2Cam::releaseBufferQueue() noexcept
+{
+    auto fd_ptr = produceV4L2FD();
+    
+    if ( !fd_ptr || !*fd_ptr ) [[unlikely]]
+        return false;
+    
+    if ( state != State::BUFFER_QUEUE_PREPPED ) [[unlikely]]
+    {
+        clog << "V4L2Cam::releaseBufferQueue: not in the correct state "
+                "(BUFFER_QUEUE_PREPPED) to un-prep a v4l2 buffer queue!"
+        << endl;
+        
+        return false;
+    }
+    
+    
+    uint32_t bufType{};
+    uint32_t memType{};
+    
+    
+    if (    !decideBufferType(bufType)
+         || !bufType
+       ) [[unlikely]]
+    {
+        clog << "V4L2Cam::releaseBufferQueue: could not decide v4l2 buffer type!"
+             << endl;
+        
+        return false;
+    }
+    
+    if (    !decideMemoryType(memType)
+         || !memType
+       ) [[unlikely]]
+    {
+        clog << "V4L2Cam::releaseBufferQueue: memory type to use unknown!"
+             << endl;
+        
+        return false;
+    }
+    
+    
+    v4l2_requestbuffers req = { .count  = 0
+                              , .type   = bufType
+                              , .memory = memType
+                              , .capabilities{}
+                              , .flags{}
+                              , .reserved{}
+                              };
+    
+    if ( !xioctl( *fd_ptr
+                , VIDIOC_REQBUFS
+                , &req
+                )
+       ) [[unlikely]]
+    {
+        clog << "V4L2Cam::releaseBufferQueue: Could not un-prep buffer queue! "
+             << strerror(errno) << endl;
+        
+        return false;
+    }
+    
+    bufferCount = 0;
+    buffersQueued.clear();
+    state = State::INITIALIZED;
+    
+    return true;
 }
 
 
@@ -276,7 +895,7 @@ void V4L2Cam::initializeSettings() {
 // {
 //     if ( initialized )
 //     {
-//         clog << "Device already initialized." << endl;
+//         clog << "V4L2Cam::Device already initialized." << endl;
 //         return false;
 //     }
 //     
@@ -284,7 +903,7 @@ void V4L2Cam::initializeSettings() {
 //     
 //     if ( fd < 0 )
 //     {
-//         clog << "Error occurred when opening cam v4l2 device node" << endl;
+//         clog << "V4L2Cam::Error occurred when opening cam v4l2 device node" << endl;
 //         return false;
 //     }
 //     
@@ -292,7 +911,7 @@ void V4L2Cam::initializeSettings() {
 //          || start_capturing() < 0
 //        )
 //     {
-//         clog << "Error occurred when initialising camera" << endl;
+//         clog << "V4L2Cam::Error occurred when initialising camera" << endl;
 //         return false;
 //     }
 //     
@@ -517,35 +1136,46 @@ bool V4L2Cam::helper_queryctrl( uint32_t id
 */
 
 
-void V4L2Cam::FD_t::close_fd() {
-    constexpr int32_t retry_count = 10;
-    int32_t delay_ms = 1;
+V4L2Cam::V4L2Cam(std::string const& sNo) noexcept
+ :  V4L2CamData(sNo)
+{}
+
+V4L2Cam::~V4L2Cam() noexcept
+{
+    static constexpr size_t maxTries{10};
     
-    int32_t result;
+    size_t tries{};
     
-    for ( int32_t attempt = 0; attempt < retry_count; ++attempt ) {
-        errno = 0;
+    while (    state == State::DEQUEUEING
+            || state == State::STREAMING
+          ) [[unlikely]]
+    {
+        wake();
+        this_thread::yield();
+        stopStreaming();
         
-        result = ::close(value);
-        
-        if ( result == 0 )
-            return;
-        
-        if ( errno == EINTR ) {
-            if ( attempt < retry_count - 1 ) {
-                this_thread::sleep_for(chrono::milliseconds(delay_ms++));
-                continue;
-            } else
-                return;
-        } else
-            return;
+        if ( tries++ >= maxTries )
+        {
+            clog << "V4L2Cam::~V4L2Cam: cannot stop streaming. "
+                    "KILLING THIS PROCESS!!!"
+                 << endl;
+            
+            std::abort();
+        }
     }
+    
+    if ( state == State::BUFFER_QUEUE_PREPPED ) [[unlikely]]
+        releaseBufferQueue();
+    
+    uninitialize();
+    
+    evntFD->close_fd();
 }
 
-int32_t V4L2Cam::xioctl( FD_t const&    fd
-                       , uint64_t       request
-                       , void*          arg
-                       , bool           quasi_blocking
+int32_t V4L2Cam::xioctl( FD_t const& fd
+                       , uint64_t    request
+                       , void*       arg
+                       , bool        quasi_blocking
                        )
 {
     constexpr uint8_t retry_count = 5;
@@ -585,41 +1215,51 @@ int32_t V4L2Cam::xioctl( FD_t const&    fd
             case ENODEV:    [[fallthrough]]; // No such device
             case ENXIO:     [[fallthrough]]; // No such device or address
             case EBADF:                     // Bad file descriptor
-                clog << "Error: Device is no longer available ("
+                clog << "V4L2Cam::xioctl: Error: Device is no longer available ("
                      << strerror(errno)
-                     << "). Uninitializing camera class is indicated." << endl;
+                     << "). Uninitializing camera class is indicated."
+                     << endl;
+                
                 errorAction = ErrorAction::Uninitialize;
                 break;
             
             // Errors indicating that resetting the camera abstraction class is appropriate
             case EBUSY:                      // Device or resource busy after retries
-                if ( capturing ) {
+                if ( state == State::STREAMING )
+                {
                     errorAction = ErrorAction::StopStreaming;
                     break;
                 }
-                            [[fallthrough]];
+                else
+                    [[fallthrough]];
             case ETIMEDOUT:                  // Connection timed out
-                clog << "Error: Device is busy or timed out ("
+                clog << "V4L2Cam::xioctl: Error: Device is busy or timed out ("
                      << strerror(errno)
-                     << "). Resetting camera class is indicated." << endl;
+                     << "). Resetting camera class is indicated."
+                     << endl;
+                
                 errorAction = ErrorAction::ReopenDescriptors;
                 break;
             
             // Errors indicating that power-cycling the USB camera is appropriate
             case EIO:       [[fallthrough]]; // Input/output error
             case EFAULT:                     // Bad address
-                clog << "Error: Hardware failure ("
+                clog << "V4L2Cam::xioctl: Error: Hardware failure ("
                      << strerror(errno)
-                     << "). Power-cycling the USB camera is indicated." << endl;
+                     << "). Power-cycling the USB camera is indicated."
+                     << endl;
+                
                 errorAction = ErrorAction::PowerCycle;
                 break;
             
             // Errors indicating permission issues
             case EPERM:     [[fallthrough]]; // Operation not permitted
             case EACCES:                     // Permission denied
-                clog << "Error: Permission denied ("
+                clog << "V4L2Cam::xioctl: Error: Permission denied ("
                      << strerror(errno)
-                     << "). Check permissions is indicated." << endl;
+                     << "). Check permissions is indicated."
+                     << endl;
+                
                 errorAction = ErrorAction::CheckPermissions;
                 break;
             
@@ -627,15 +1267,19 @@ int32_t V4L2Cam::xioctl( FD_t const&    fd
             case EINVAL:    [[fallthrough]]; // Invalid argument
             case ENOTTY:    [[fallthrough]]; // Inappropriate ioctl for device
             case EOVERFLOW:                  // Value too large for defined data type
-                clog << "Error: Invalid request or argument ("
+                clog << "V4L2Cam::xioctl: Error: Invalid request or argument ("
                      << strerror(errno)
-                     << "). Check configuration is indicated." << endl;
+                     << "). Check configuration is indicated."
+                     << endl;
+                
                 errorAction = ErrorAction::CheckLogic;
                 break;
             
             case ENOMEM:                     // Out of memory
-                clog << "Error: Out of memory ("
-                     << strerror(errno) << ")." << endl;
+                clog << "V4L2Cam::xioctl: Error: Out of memory ("
+                     << strerror(errno) << ")."
+                     << endl;
+                
                 errorAction = ErrorAction::FreeMemory;
                 break;
             
@@ -645,9 +1289,10 @@ int32_t V4L2Cam::xioctl( FD_t const&    fd
                 break;
             
             default:
-                clog << "Error: ioctl failed with errno " << errno
-                     << " (" << strerror(errno) << ")." << endl;
-                // You can decide on a default action or leave it as None
+                clog << "V4L2Cam::xioctl: Error: ioctl failed with errno "
+                     << errno << " (" << strerror(errno) << ")."
+                     << endl;
+                
                 break;
         }
     }
@@ -677,17 +1322,23 @@ int32_t V4L2Cam::xopen( char    const* pathname
                 this_thread::sleep_for(chrono::milliseconds(delay_ms *= 2));
                 continue;
             } else {
-                clog << "Failed to open character device after "
+                clog << "V4L2Cam::xopen: Failed to open character device after "
                      << (attempt + 1) << " attempts: " << strerror(errno)
                      << endl;
+                
                 break;
             }
         } else if ( errno == ENOENT || errno == ENODEV ) {
-            clog << "character device not found: " << strerror(errno) << endl;
+            clog << "V4L2Cam::xopen: character device not found: "
+                 << strerror(errno)
+                 << endl;
+            
             break;
         } else {
-            clog << "Failed to open character device: " << strerror(errno)
+            clog << "V4L2Cam::xopen: Failed to open character device: "
+                 << strerror(errno)
                  << endl;
+            
             break;
         }
     }
@@ -695,8 +1346,40 @@ int32_t V4L2Cam::xopen( char    const* pathname
     return fd;
 }
 
+
+// private:
+
+void V4L2Cam::initializeSettings()
+{
+    fetchResolutionAndPixelFormat();
+    fetchBrightness();
+    fetchContrast();
+    fetchSaturation();
+    fetchSharpness();
+    fetchGamma();
+    fetchWhiteBalance();
+    fetchGain();
+    fetchPowerLineFrequency();
+    fetchExposure();
+}
+
+void V4L2Cam::reapplySettings()
+{
+    applyResolutionAndPixelFormat();
+    applyBrightness();
+    applyContrast();
+    applySaturation();
+    applySharpness();
+    applyGamma();
+    applyWhiteBalance();
+    applyGain();
+    applyPowerLineFrequency();
+    applyExposure();
+}
+
 // only to be used by locateDeviceNodeAndInitialize()
-void V4L2Cam::resetCrop(FD_t const& fd) {
+void V4L2Cam::resetCrop(FD_t const& fd)
+{
     // if the cam can crop, reset crop
     v4l2_cropcap cropcap{};
     
@@ -711,6 +1394,20 @@ void V4L2Cam::resetCrop(FD_t const& fd) {
     }
 }
 
+// bool V4L2Cam::isMemoryTypeSupported( FD_t const&   fd_ptr
+//                                    , v4l2_buf_type type
+//                                    , v4l2_memory   mem_type
+//                                    )
+// {
+//     v4l2_requestbuffers req = {};
+//     req.count = 0;  // no buffer allocation
+//     req.type = type;
+//     req.memory = mem_type;
+//     
+//     return xioctl(*fd_ptr, VIDIOC_REQBUFS, &req);
+// }
+
+
 bool V4L2Cam::determineMaxBufferSizeNeeded(FD_t const& fd) {
     // TODO also learn supported resolutions and supported pixel formats
     maxBufferSizeNeeded.reset();
@@ -718,10 +1415,23 @@ bool V4L2Cam::determineMaxBufferSizeNeeded(FD_t const& fd) {
     uint32_t maxSizeImage = 0;
     SUPPORTS__VIDIOC_TRY_FMT = true;
     
+    uint32_t bufType{};
+    
+    if (    !decideBufferType(bufType)
+         || !bufType
+       ) [[unlikely]]
+    {
+        clog << "V4L2Cam::requestBufferQueue: could not decide v4l2 buffer type!"
+             << endl;
+        
+        return false;
+    }
+
+    
     // Check if VIDIOC_TRY_FMT is supported
     v4l2_format originalFmt{};
     
-    originalFmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    originalFmt.type = bufType;
     
     if ( !xioctl(fd, VIDIOC_G_FMT, &originalFmt) )
         return false;
@@ -736,6 +1446,7 @@ bool V4L2Cam::determineMaxBufferSizeNeeded(FD_t const& fd) {
     // Structure to enumerate pixel formats
     v4l2_fmtdesc fmtDesc{};
     
+    // TODO after this, do it again with the *_MPLANE type
     fmtDesc.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     
     // Enumerate all supported pixel formats
@@ -766,7 +1477,10 @@ bool V4L2Cam::determineMaxBufferSizeNeeded(FD_t const& fd) {
                     fmt.fmt.pix.height = frmSize.stepwise.max_height;
                     break;
                 default:
-                    clog << "Unknown frame size type." << endl;
+                    clog << "V4L2Cam::determineMaxBufferSizeNeeded: Unknown "
+                            "frame size type."
+                         << endl;
+                    
                     frmSize.index++;
                     continue;
             }
@@ -783,7 +1497,10 @@ bool V4L2Cam::determineMaxBufferSizeNeeded(FD_t const& fd) {
         }
         
         if ( errno != EINVAL && errno != 0 ) {
-            clog << "v4l2 device frame sizes enumeration errored out" << endl;
+            clog << "V4L2Cam::determineMaxBufferSizeNeeded: v4l2 device frame "
+                    "sizes enumeration errored out"
+                 << endl;
+            
             return false;
         }
         
@@ -791,19 +1508,30 @@ bool V4L2Cam::determineMaxBufferSizeNeeded(FD_t const& fd) {
     }
     
     if ( errno != EINVAL && errno != 0 ) {
-        clog << "v4l2 device format enumeration errored out" << endl;
+        clog << "V4L2Cam::determineMaxBufferSizeNeeded: v4l2 device format "
+                "enumeration errored out"
+             << endl;
+        
         return false;
     }
     
     if (    !SUPPORTS__VIDIOC_TRY_FMT
          &&  xioctl(fd, VIDIOC_S_FMT, &originalFmt) != 0
        )
-        clog << "Restoring original format failed" << endl;
+    {
+        apiToUse = APIToUse::UNKNOWN;
+        
+        clog << "V4L2Cam::determineMaxBufferSizeNeeded: Restoring original "
+                "format failed"
+             << endl;
+    }
     
     if ( maxSizeImage > 0 )
         maxBufferSizeNeeded = maxSizeImage;
     else
-        clog << "Failed to determine the maximum buffer size." << endl;
+        clog << "V4L2Cam::determineMaxBufferSizeNeeded: Failed to determine "
+                "the maximum buffer size."
+             << endl;
     
     return maxBufferSizeNeeded.has_value();
 }
@@ -846,8 +1574,9 @@ void V4L2Cam::queryControlDomain( FD_t     const& fd
             step = queryctrl.step;
         }
     } else if (errno != EINVAL)
-        clog << "Error querying control " << controlID
-             << ": " << strerror(errno) << endl;
+        clog << "V4L2Cam::queryControlDomain: Error querying control "
+             << controlID << ": " << strerror(errno)
+             << endl;
 }
 
 
@@ -877,7 +1606,7 @@ bool V4L2Cam::openV4L2FD() {
 }
 
 void V4L2Cam::closeV4L2FD() {
-    if ( !v4l2FD || !*v4l2FD )
+    if ( v4l2FD && !*v4l2FD )
         v4l2FD->close_fd();
     
     v4l2FD.reset();
@@ -887,57 +1616,28 @@ void V4L2Cam::closeV4L2FD() {
 void V4L2Cam::uninitialize() {
     // stopCapturing();
     
+    _uninitialize();
+    
     closeV4L2FD();
     v4l2Path.clear();
     USBKernelName.clear();
     USBBusNumber.clear();
     USBDeviceAddress.clear();
     
-    initialized = false;
-    initialized_newly = false;
+    state = state == State::UNINITIALIZED
+          ? State::UNINITIALIZED
+          : State::DEVICE_KNOWN;
     
-    currentBufferSizeNeeded.reset();
-    
-    resolutionSource = ssrc::UNKNOWN;
-    width.reset();
-    height.reset();
-    
-    pixelFormatSource = ssrc::UNKNOWN;
-    pixelFormat.reset();
-    
-    brightnessSource = ssrc::UNKNOWN;
-    brightness.reset();
-    
-    contrastSource = ssrc::UNKNOWN;
-    contrast.reset();
-    
-    saturationSource = ssrc::UNKNOWN;
-    saturation.reset();
-    
-    sharpnessSource = ssrc::UNKNOWN;
-    sharpness.reset();
-    
-    gammaSource = ssrc::UNKNOWN;
-    gamma.reset();
-    
-    whiteBalanceSource = ssrc::UNKNOWN;
-    whiteBalance.reset();
-    
-    gainSource = ssrc::UNKNOWN;
-    gain.reset();
-    
-    powerLineFrequencySource = ssrc::UNKNOWN;
-    powerLineFrequency.reset();
-    
-    exposureSource = ssrc::UNKNOWN;
-    exposure.reset();
-    
-    _uninitialize();
+    bufferCount       = 0;
+    buffersQueued     = {};
+    bufferPlanes      = {};
 }
 
 bool V4L2Cam::rebindUSBDevice() {
     if ( USBKernelName.empty() ) {
-        clog << "USB kernel name is not set." << endl;
+        clog << "V4L2Cam::rebindUSBDevice: USB kernel name is not set."
+             << endl;
+        
         return false;
     }
 
@@ -947,9 +1647,13 @@ bool V4L2Cam::rebindUSBDevice() {
     if ( unbindFile.is_open() ) {
         unbindFile << USBKernelName;
         unbindFile.close();
-        cout << "Device " << USBKernelName << " unbound." << endl;
+        clog << "V4L2Cam::powerCycleDevice: Device " << USBKernelName <<
+                " unbound."
+             << endl;
     } else {
-        clog << "Failed to open " << unbindPath << endl;
+        clog << "V4L2Cam::rebindUSBDevice: Failed to open " << unbindPath
+             << endl;
+        
         return false;
     }
 
@@ -962,9 +1666,14 @@ bool V4L2Cam::rebindUSBDevice() {
     if ( bindFile.is_open() ) {
         bindFile << USBKernelName;
         bindFile.close();
-        cout << "Device " << USBKernelName << " rebound." << endl;
+        
+        clog << "V4L2Cam::rebindUSBDevice: Device " << USBKernelName <<
+                " rebound."
+             << endl;
     } else {
-        clog << "Failed to open " << bindPath << endl;
+        clog << "V4L2Cam::rebindUSBDevice: Failed to open " << bindPath
+             << endl;
+        
         return false;
     }
 
@@ -976,7 +1685,9 @@ bool V4L2Cam::rebindUSBDevice() {
 
 bool V4L2Cam::powerCycleDevice() {
     if ( USBBusNumber.empty() || USBDeviceAddress.empty() ) {
-        clog << "USB bus number or device address is not set." << endl;
+        clog << "V4L2Cam::powerCycleDevice: USB bus number or device address "
+                "is not set."
+             << endl;
         
         return false;
     }
@@ -990,7 +1701,8 @@ bool V4L2Cam::powerCycleDevice() {
     
     res = libusb_init(&ctx);
     if ( res < 0 ) {
-        clog << "Failed to initialize libusb: " << libusb_error_name(res)
+        clog << "V4L2Cam::powerCycleDevice: Failed to initialize libusb: "
+             << libusb_error_name(res)
              << endl;
         
         return false;
@@ -1027,7 +1739,8 @@ bool V4L2Cam::powerCycleDevice() {
                                  , 1000
                                  );
     if ( res < 0 ) {
-        clog << "Failed to power off the device." << endl;
+        clog << "V4L2Cam::powerCycleDevice: Failed to power off the device."
+             << endl;
         
         libusb_close(hub_handle);
         libusb_exit(ctx);
@@ -1059,7 +1772,8 @@ bool V4L2Cam::powerCycleDevice() {
     } while ( res < 0 && attempt < max_attempts );
     
     if ( res < 0 )
-        clog << "Failed to power on the device." << endl;
+        clog << "V4L2Cam::powerCycleDevice: Failed to power on the device."
+             << endl;
     else
         this_thread::sleep_for(chrono::seconds(1));
     
@@ -1088,8 +1802,9 @@ bool V4L2Cam::produceHubHandleAndPortNumber( libusb_context* const     ctx
     
     cnt = libusb_get_device_list(ctx, &dev_list);
     if ( cnt < 0 ) {
-        clog << "Failed to get device list: "
-             << libusb_error_name(static_cast<int>(cnt)) << endl;
+        clog << "V4L2Cam::produceHubHandleAndPortNumber: Failed to get device "
+                "list: " << libusb_error_name(static_cast<int>(cnt))
+             << endl;
         
         return false;
     }
@@ -1104,29 +1819,37 @@ bool V4L2Cam::produceHubHandleAndPortNumber( libusb_context* const     ctx
         
         res = libusb_open(device, &handle);
         if ( res < 0 ) {
-            clog << "Failed to open device: " << libusb_error_name(res)
+            clog << "V4L2Cam::produceHubHandleAndPortNumber: Failed to open "
+                    "device: " << libusb_error_name(res)
                  << endl;
+            
             break;
         }
         
         // Get the parent device (the hub)
         libusb_device* parent = libusb_get_parent(device);
         if ( !parent ) {
-            clog << "Failed to get parent device (hub)" << endl;
+            clog << "V4L2Cam::produceHubHandleAndPortNumber: Failed to get "
+                    "parent device (hub)"
+                 << endl;
+            
             break;
         }
         
         res = libusb_open(parent, &hub_handle);
         if ( res < 0 ) {
-            clog << "Failed to open hub device: " << libusb_error_name(res)
+            clog << "V4L2Cam::produceHubHandleAndPortNumber: Failed to open "
+                    "hub device: " << libusb_error_name(res)
                  << endl;
+            
             break;
         }
         
         res = libusb_get_device_descriptor(parent, &hub_desc);
         if ( res < 0 ) {
-            clog << "Failed to get hub descriptor: "
-                 << libusb_error_name(res) << endl;
+            clog << "V4L2Cam::produceHubHandleAndPortNumber: Failed to get hub "
+                    "descriptor: " << libusb_error_name(res)
+                 << endl;
                  
             libusb_close(hub_handle);
             hub_handle = nullptr;
@@ -1145,67 +1868,75 @@ bool V4L2Cam::produceHubHandleAndPortNumber( libusb_context* const     ctx
     libusb_free_device_list(dev_list, 1);
     
     if ( !found )
-        clog << "Device not found" << endl;
+        clog << "V4L2Cam::produceHubHandleAndPortNumber: Device not found"
+             << endl;
     
     return found;
 }
 
 
 
-bool V4L2Cam::stopCapturing()
+bool V4L2Cam::decideBufferType(uint32_t& bufType) noexcept
 {
-    shared_ptr<FD_t> fd_ptr = produceV4L2FD();
-    
-    if ( !fd_ptr || !*fd_ptr ) [[unlikely]]
-        return false;
-    
-    enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    
-    if ( !xioctl(*fd_ptr, VIDIOC_STREAMOFF, &type) )
+    if ( apiToUse == APIToUse::UNKNOWN ) [[unlikely]]
     {
-        clog << "Error occurred when streaming off" << endl;
+        giveV4L2Format(); // learning apiToUse is a side-effect
         
-        return false;
-    }
-    
-    capturing = false;
-    
-    return true;
-}
-
-bool V4L2Cam::startCapturing()
-{
-    shared_ptr<FD_t> fd_ptr = produceV4L2FD();
-    
-    if ( !fd_ptr || !*fd_ptr ) [[unlikely]]
-        return false;
-    
-    for ( unsigned int i = 0; i < n_buffers; ++i )
-    {
-        v4l2_buffer buf{};
-        
-        buf.type      = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-        buf.memory    = V4L2_MEMORY_USERPTR;
-        buf.index     = i;
-        buf.m.userptr = (uint64_t)buffers[i].start;
-        buf.length    = buffers[i].length;
-        
-        if ( !xioctl(*fd_ptr, VIDIOC_QBUF, &buf) )
+        if ( apiToUse == APIToUse::UNKNOWN )
         {
-            clog << "Error occurred when queueing buffer" << endl;
+            clog << "V4L2Cam::decideBufferType: Soemthing's off. Can't learn "
+                    "the API to use (single- vs multi-planar)!"
+                 << endl;
+            
             return false;
         }
     }
     
-    enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     
-    if ( !xioctl(*fd_ptr, VIDIOC_STREAMON, &type) )
+    switch ( apiToUse )
     {
-        clog << "Error when turning on stream" << endl;
+        case APIToUse::MULTI : bufType = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE; break;
+        case APIToUse::SINGLE: bufType = V4L2_BUF_TYPE_VIDEO_CAPTURE       ; break;
+        
+        default: [[unlikely]] // [[impossible]] rather
+            bufType = 0;
+            
+            clog << "V4L2Cam::decideBufferType: device wants us to use an API "
+                    "unknown to us!"
+                 << endl;
+            
+            return false;
+    }
+    
+    return true;
+}
+
+bool V4L2Cam::decideMemoryType(uint32_t& memType) noexcept
+{
+    if (    memoryType == MemoryType::UNKNOWN
+         || memoryType == MemoryType::MMAP
+       ) [[unlikely]]
+    {
+        clog << "V4L2Cam::decideMemoryType: not set (by user) to a supported "
+                "memory type!"
+             << endl;
+        
         return false;
     }
     
-    capturing = true;
+    
+    switch ( memoryType )
+    {
+        case MemoryType::USERPTR: memType = V4L2_MEMORY_USERPTR; break;
+        case MemoryType::DMABUF : memType = V4L2_MEMORY_DMABUF ; break;
+        
+        default: [[unlikely]] // [[impossible]] rather(, unless so. invented new ones)
+            clog << "V4L2Cam::decideMemoryType: user asks for unknown memory "
+                    "type!"
+                 << endl;
+            
+            return false;
+    }
     
     return true;
 }
@@ -1248,6 +1979,41 @@ bool V4L2Cam::apply_control_value( shared_ptr<FD_t> fd_ptr
     v4l2_control ctrl{id, value};
     
     return xioctl(*fd_ptr, VIDIOC_S_CTRL, &ctrl) == 0;
+}
+
+//  public:
+optional<v4l2_format> V4L2Cam::giveV4L2Format()
+{
+    auto fd_ptr = produceV4L2FD();
+    
+    if ( !fd_ptr || !*fd_ptr ) [[unlikely]]
+        return {};
+    
+    v4l2_format format{};
+    
+    format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+    if ( xioctl(*fd_ptr, VIDIOC_G_FMT, &format))
+    {
+        apiToUse = APIToUse::MULTI;
+        
+        return format;
+    }
+    
+    format = {};
+    format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    if ( xioctl(*fd_ptr, VIDIOC_G_FMT, &format))
+    {
+        apiToUse = APIToUse::SINGLE;
+        
+        return format;
+    }
+    
+    apiToUse = APIToUse::UNKNOWN;
+    
+    clog << "V4L2Cam::giveV4L2Format: requesting format failed! "
+         << strerror(errno) << endl;
+    
+    return {};
 }
 
 
@@ -1345,9 +2111,39 @@ bool V4L2Cam::fetchResolutionAndPixelFormat()
     resolutionSource  = ssrc::FETCHED;
     pixelFormatSource = ssrc::FETCHED;
     
-    format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    if ( xioctl(*fd_ptr, VIDIOC_G_FMT, &format))
+    format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+    
+    if ( xioctl(*fd_ptr, VIDIOC_G_FMT, &format) )
     {
+        apiToUse = APIToUse::MULTI;
+        
+        if ( checkResolution(format.fmt.pix_mp.width, format.fmt.pix_mp.height) ) {
+            width  = static_cast<uint32_t>(format.fmt.pix_mp.width);
+            height = static_cast<uint32_t>(format.fmt.pix_mp.height);
+        } else {
+            width .reset();
+            height.reset();
+        }
+        
+        if ( checkPixelFormat(format.fmt.pix_mp.pixelformat) )
+            pixelFormat = static_cast<PixelFormat>(format.fmt.pix_mp.pixelformat);
+        else
+            pixelFormat.reset();
+        
+        if ( format.fmt.pix_mp.num_planes == 1 ) // currently, we support no more
+            currentBufferSizeNeeded
+             =  static_cast<uint32_t>(format.fmt.pix_mp.plane_fmt[0].sizeimage);
+        
+        return true;
+    }
+    
+    format = {};
+    format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    
+    if ( xioctl(*fd_ptr, VIDIOC_G_FMT, &format) )
+    {
+        apiToUse = APIToUse::SINGLE;
+        
         if ( checkResolution(format.fmt.pix.width, format.fmt.pix.height) ) {
             width  = format.fmt.pix.width;
             height = format.fmt.pix.height;
@@ -1364,7 +2160,11 @@ bool V4L2Cam::fetchResolutionAndPixelFormat()
         currentBufferSizeNeeded = format.fmt.pix.sizeimage;
         
         return true;
-    } else {
+    }
+    else
+    {
+        apiToUse = APIToUse::UNKNOWN;
+        
         width      .reset();
         height     .reset();
         pixelFormat.reset();
@@ -1387,15 +2187,42 @@ bool V4L2Cam::applyResolutionAndPixelFormat()
     
     v4l2_format format{};
     
-    format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    if ( !xioctl(*fd_ptr, VIDIOC_G_FMT, &format) )
-        return false;
+    format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
     
-    format.fmt.pix.width       = width      .value();
-    format.fmt.pix.height      = height     .value();
-    format.fmt.pix.pixelformat = enum_integer(pixelFormat.value());
-    // format.fmt.pix.field = V4L2_FIELD_INTERLACED; // from e-con's example. strange
-    format.fmt.pix.field       = V4L2_FIELD_NONE;
+    if ( xioctl(*fd_ptr, VIDIOC_G_FMT, &format) )
+    {
+        apiToUse = APIToUse::MULTI;
+        
+        format.fmt.pix_mp.width       = width      .value();
+        format.fmt.pix_mp.height      = height     .value();
+        format.fmt.pix_mp.pixelformat = enum_integer(pixelFormat.value());
+        // format.fmt.pix_mp.field = V4L2_FIELD_INTERLACED; // from e-con's example. strange
+        format.fmt.pix_mp.field       = V4L2_FIELD_NONE;
+    }
+    else
+    {
+        format = {};
+        
+        format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        
+        if ( xioctl(*fd_ptr, VIDIOC_G_FMT, &format) )
+        {
+            apiToUse = APIToUse::SINGLE;
+            
+            format.fmt.pix.width       = width      .value();
+            format.fmt.pix.height      = height     .value();
+            format.fmt.pix.pixelformat = enum_integer(pixelFormat.value());
+            // format.fmt.pix.field = V4L2_FIELD_INTERLACED; // from e-con's example. strange
+            format.fmt.pix.field       = V4L2_FIELD_NONE;
+        }
+        else
+        {
+            apiToUse = APIToUse::UNKNOWN;
+            
+            return false;
+        }
+    }
+    
     
     if ( xioctl(*fd_ptr, VIDIOC_S_FMT, &format) ) {
         currentBufferSizeNeeded = format.fmt.pix.sizeimage;
@@ -1406,6 +2233,27 @@ bool V4L2Cam::applyResolutionAndPixelFormat()
         
         return false;
     }
+}
+
+
+bool V4L2Cam::giveMaxBufferSizeNeeded(uint32_t& mbs)
+{
+    if ( !maxBufferSizeNeeded.has_value() ) [[unlikely]]
+        return false;
+    
+    mbs = maxBufferSizeNeeded.value();
+    
+    return true;
+}
+
+bool V4L2Cam::giveCurrentBufferSizeNeeded(uint32_t& cbs)
+{
+    if ( !currentBufferSizeNeeded.has_value() ) [[unlikely]]
+        return false;
+    
+    cbs = currentBufferSizeNeeded.value();
+    
+    return true;
 }
 
 

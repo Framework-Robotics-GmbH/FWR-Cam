@@ -107,16 +107,15 @@ static constexpr uint8_t GET_SUCCESS                     = 0x01;
 
 
 
-void See3CAM_24CUG::initializeBuffers()
-{
-    // Initialize input and output buffers
-    memset(g_out_packet_buf, 0x00, sizeof(g_out_packet_buf));
-    memset( g_in_packet_buf, 0x00, sizeof( g_in_packet_buf));
-}
+See3CAM_24CUG:: See3CAM_24CUG(std::string const& serialNo) noexcept
+ :  V4L2Cam(serialNo)
+{}
 
-
-// See3CAM_24CUG:: See3CAM_24CUG() {}
 See3CAM_24CUG::~See3CAM_24CUG() {}
+
+
+string_view const& See3CAM_24CUG::produceVendorID()  noexcept { return   ECON_VID; }
+string_view const& See3CAM_24CUG::produceProductID() noexcept { return CAMERA_PID; }
 
 
 bool See3CAM_24CUG::_locateDeviceNodeAndInitialize( udev       * uDev
@@ -127,7 +126,10 @@ bool See3CAM_24CUG::_locateDeviceNodeAndInitialize( udev       * uDev
     
     udev_enumerate* enumerate = udev_enumerate_new(uDev);
     if ( !enumerate ) {
-        clog << "udev_enumerate_new failed" << endl;
+        clog << "See3CAM_24CUG::_locateDeviceNodeAndInitialize: "
+                "udev_enumerate_new failed"
+             << endl;
+        
         return false;
     }
     
@@ -156,7 +158,10 @@ bool See3CAM_24CUG::_locateDeviceNodeAndInitialize( udev       * uDev
         
         FD_t fd{xopen(dev_path, O_RDWR | O_NONBLOCK)};
         if ( fd < 0 ) {
-            clog << "Could not open hidraw device path" << endl;
+            clog << "See3CAM_24CUG::_locateDeviceNodeAndInitialize: Could not "
+                    "open hidraw device path"
+                 << endl;
+            
             udev_device_unref(dev);
             continue;
         }
@@ -174,7 +179,9 @@ bool See3CAM_24CUG::_locateDeviceNodeAndInitialize( udev       * uDev
     udev_enumerate_unref(enumerate);
     
     if ( !initialized )
-            clog << "Could not find hidraw device node"<< endl;
+            clog << "See3CAM_24CUG::_locateDeviceNodeAndInitialize: Could not "
+                    "find hidraw device node"
+                 << endl;
     
     return initialized;
     
@@ -279,6 +286,16 @@ void See3CAM_24CUG::_uninitialize() {
     streamModeSource = ssrc::UNKNOWN;
     streamMode.reset();
     streamModeFunctionLock.reset();
+    
+    initialized = false;
+}
+
+
+void See3CAM_24CUG::initializeBuffers()
+{
+    // Initialize input and output buffers
+    memset(g_out_packet_buf, 0x00, sizeof(g_out_packet_buf));
+    memset( g_in_packet_buf, 0x00, sizeof( g_in_packet_buf));
 }
 
 
@@ -313,10 +330,16 @@ bool See3CAM_24CUG::sendHidCmd( uint8_t* outBuf
                 continue;
             } else if ( errno == EIO ) {
                 // Optionally implement a retry mechanism here
-                clog << "Write I/O error: " << strerror(errno) << '\n';
+                clog << "See3CAM_24CUG::sendHidCmd: Write I/O error: "
+                     << strerror(errno)
+                     << endl;
+                
                 return false;
             } else {
-                clog << "Write error: " << strerror(errno) << '\n';
+                clog << "See3CAM_24CUG::sendHidCmd: Write error: "
+                     << strerror(errno)
+                     << endl;
+                
                 return false;
             }
         }
@@ -336,7 +359,10 @@ bool See3CAM_24CUG::sendHidCmd( uint8_t* outBuf
         auto now = chrono::steady_clock::now();
         
         if ( now >= end_time ) {
-            clog << "Timeout waiting for data from HID device.\n";
+            clog << "See3CAM_24CUG::sendHidCmd: Timeout waiting for data from "
+                    "HID device."
+                 << endl;
+            
             return false;
         }
         
@@ -359,10 +385,16 @@ bool See3CAM_24CUG::sendHidCmd( uint8_t* outBuf
                 continue;
             }
             
-            clog << "Select error: " << strerror(errno) << '\n';
+            clog << "See3CAM_24CUG::sendHidCmd: Select error: "
+                 << strerror(errno)
+                 << endl;
+            
             return false;
         } else if ( select_result == 0 ) {
-            clog << "Timeout waiting for data from HID device.\n";
+            clog << "See3CAM_24CUG::sendHidCmd: Timeout waiting for data from "
+                    "HID device."
+                 << endl;
+            
             return false;
         }
         
@@ -377,7 +409,10 @@ bool See3CAM_24CUG::sendHidCmd( uint8_t* outBuf
         
         // Check how many bytes are available
         if ( xioctl(*fd_ptr, FIONREAD, &available_bytes) != 0 ) {
-            clog << "ioctl error: " << strerror(errno) << endl;
+            clog << "See3CAM_24CUG::sendHidCmd: ioctl error: "
+                 << strerror(errno)
+                 << endl;
+            
             return false;
         }
         
@@ -395,14 +430,23 @@ bool See3CAM_24CUG::sendHidCmd( uint8_t* outBuf
                     continue;
                 } else if ( errno == EIO ) {
                     // Optionally implement a retry mechanism here
-                    clog << "Read I/O error: " << strerror(errno) << '\n';
+                    clog << "See3CAM_24CUG::sendHidCmd: Read I/O error: "
+                         << strerror(errno)
+                         << endl;
+                    
                     return false;
                 } else {
-                    clog << "Read error: " << strerror(errno) << '\n';
+                    clog << "See3CAM_24CUG::sendHidCmd: Read error: "
+                         << strerror(errno)
+                         << endl;
+                    
                     return false;
                 }
             } else if ( result == 0 ) {
-                clog << "HID device disconnected during read.\n";
+                clog << "See3CAM_24CUG::sendHidCmd: HID device disconnected "
+                        "during read."
+                     << endl;
+                
                 return false;
             }
             
