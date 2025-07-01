@@ -22,6 +22,10 @@
 
 
 
+namespace FWR::Cam_lnx
+{
+
+
 template <size_t N>
 class SmallBitset
 {
@@ -56,3 +60,6 @@ public:
 private:
     value_t bits{};
 };
+
+
+} // namespace FWR::Cam_lnx

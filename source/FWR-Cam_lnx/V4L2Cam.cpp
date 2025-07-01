@@ -94,6 +94,65 @@ void V4L2CamData::FD_t::close_fd()
 }
 
 
+bool V4L2Cam::goIntoInitializedState() noexcept
+{
+    if ( isJustInitialized() )
+        return true;
+    
+    if (    state == State::UNINITIALIZED
+         || state == State::DEVICE_KNOWN
+       )
+    {
+        if ( !locateDeviceNodeAndInitialize() ) [[unlikely]]
+        {
+            clog << "V4L2Cam::goIntoInitializedState: could not reach State::"
+                    "INITIALIZED!"
+                 << endl;
+            
+            return false;
+        }
+        
+        return true;
+    }
+    
+    [[unlikely]]
+    
+    if (     (    state == State::DEQUEUEING
+               || state == State::STREAMING
+             )
+         && !tryAndStopStreaming(false)
+       ) [[unlikely]]
+    {
+        clog << "V4L2Cam::goIntoInitializedState: cannot stop streaming!"
+             << endl;
+        
+        return false;
+    }
+    
+    if ( state == State::BUFFER_QUEUE_PREPPED )
+    {
+        if ( !releaseBufferQueue() ) [[unlikely]]
+        {
+            clog << "V4L2Cam::goIntoInitializedState: could not release device's "
+                    "buffer queue!"
+                 << endl;
+            
+            return false;
+        }
+    }
+    
+    if ( !isJustInitialized() ) [[unlikely]]
+    {
+        clog << "V4L2Cam::goIntoInitializedState: current state not known to "
+                "this here function!"
+             << endl;
+        
+        return false;
+    }
+    
+    return true;
+}
+
 bool V4L2Cam::locateDeviceNodeAndInitialize()
 {
     if (    state != State::INITIALIZED
@@ -315,8 +374,19 @@ bool V4L2Cam::usingMemoryType(MemoryType mt) noexcept
     }
     
     
+    MemoryType oldMemTyp = memoryType;
     memoryType = mt;
     
+    if ( !isSetMemoryTypeSupported() ) [[unlikely]]
+    {
+        memoryType = oldMemTyp;
+        
+        clog << "V4L2Cam::usingMemoryType: could not verify, that the device "
+                "supports the given buffer type (v4l2_memory)!"
+             << endl;
+        
+        return false;
+    }
     return true;
 }
 
@@ -371,7 +441,7 @@ bool V4L2Cam::requestBufferQueue(uint32_t count) noexcept
                               , .reserved{}
                               };
     
-    if (! xioctl(*fd_ptr, VIDIOC_REQBUFS, &req) ) [[unlikely]]
+    if ( !xioctl(*fd_ptr, VIDIOC_REQBUFS, &req) ) [[unlikely]]
     {
         clog << "V4L2Cam::requestBufferQueue: Could not have the device prepare "
                 "a buffer queue for " << count << " buffers! "
@@ -594,11 +664,12 @@ bool V4L2Cam::fillBuffer(v4l2_buffer& buf) noexcept
     state = State::DEQUEUEING;
     
     
-    pollfd fds[2];
+    pollfd fds[2]{};
     fds[0].fd     = *fd_ptr;
     fds[0].events = POLLIN;
     
-    if (evntFD) {
+    if ( evntFD ) [[  likely]]
+    {
         fds[1].fd     = *evntFD;
         fds[1].events = POLLIN;
     }
@@ -621,7 +692,9 @@ bool V4L2Cam::fillBuffer(v4l2_buffer& buf) noexcept
             return false;
         }
         
-        if ( fds[1].revents & POLLIN ) [[unlikely]]
+        if (    evntFD
+             && fds[1].revents & POLLIN
+           ) [[unlikely]]
         {
             uint64_t dummy;
             read(*evntFD, &dummy, sizeof(dummy));
@@ -1142,27 +1215,7 @@ V4L2Cam::V4L2Cam(std::string const& sNo) noexcept
 
 V4L2Cam::~V4L2Cam() noexcept
 {
-    static constexpr size_t maxTries{10};
-    
-    size_t tries{};
-    
-    while (    state == State::DEQUEUEING
-            || state == State::STREAMING
-          ) [[unlikely]]
-    {
-        wake();
-        this_thread::yield();
-        stopStreaming();
-        
-        if ( tries++ >= maxTries )
-        {
-            clog << "V4L2Cam::~V4L2Cam: cannot stop streaming. "
-                    "KILLING THIS PROCESS!!!"
-                 << endl;
-            
-            std::abort();
-        }
-    }
+    tryAndStopStreaming(true); // std::aborts, if it doesn't work out!
     
     if ( state == State::BUFFER_QUEUE_PREPPED ) [[unlikely]]
         releaseBufferQueue();
@@ -1394,18 +1447,69 @@ void V4L2Cam::resetCrop(FD_t const& fd)
     }
 }
 
-// bool V4L2Cam::isMemoryTypeSupported( FD_t const&   fd_ptr
-//                                    , v4l2_buf_type type
-//                                    , v4l2_memory   mem_type
-//                                    )
-// {
-//     v4l2_requestbuffers req = {};
-//     req.count = 0;  // no buffer allocation
-//     req.type = type;
-//     req.memory = mem_type;
-//     
-//     return xioctl(*fd_ptr, VIDIOC_REQBUFS, &req);
-// }
+bool V4L2Cam::isSetMemoryTypeSupported() noexcept
+{
+    if ( state != State::INITIALIZED ) [[unlikely]]
+    {
+        clog << "V4L2Cam::isSetMemoryTypeSupported: not in a correct state "
+                "(INITIALIZED) to check buffer type support! (needs requesting "
+                "0 buffers)"
+             << endl;
+        
+        return false;
+    }
+    
+    shared_ptr<FD_t> fd_ptr = produceV4L2FD();
+    
+    if ( !fd_ptr || !*fd_ptr ) [[unlikely]]
+        return false;
+    
+    
+    uint32_t bufType{};
+    uint32_t memType{};
+    
+    
+    if (    !decideBufferType(bufType)
+         || !bufType
+       ) [[unlikely]]
+    {
+        clog << "V4L2Cam::isSetMemoryTypeSupported: could not decide v4l2 "
+                "buffer type!"
+             << endl;
+        
+        return false;
+    }
+    
+    if (    !decideMemoryType(memType)
+         || !memType
+       ) [[unlikely]]
+    {
+        clog << "V4L2Cam::isSetMemoryTypeSupported: memory type to use unknown!"
+             << endl;
+        
+        return false;
+    }
+    
+    
+    v4l2_requestbuffers req = { .count  = 0
+                              , .type   = bufType
+                              , .memory = memType
+                              , .capabilities{}
+                              , .flags{}
+                              , .reserved{}
+                              };
+    
+    if ( !xioctl(*fd_ptr, VIDIOC_REQBUFS, &req) ) [[unlikely]]
+    {
+        clog << "V4L2Cam::isSetMemoryTypeSupported: device does not support set "
+                "buffer type (v4l2_memory)! "
+             << strerror(errno) << endl;
+        
+        return false;
+    }
+    
+    return true;
+}
 
 
 bool V4L2Cam::determineMaxBufferSizeNeeded(FD_t const& fd) {
@@ -1613,8 +1717,58 @@ void V4L2Cam::closeV4L2FD() {
 }
 
 
-void V4L2Cam::uninitialize() {
-    // stopCapturing();
+bool V4L2Cam::tryAndStopStreaming(bool hard) noexcept
+{
+    static constexpr size_t maxTries{10};
+    
+    size_t tries{};
+    
+    while (    state == State::DEQUEUEING
+            || state == State::STREAMING
+          ) [[unlikely]]
+    {
+        wake();
+        this_thread::yield();
+        stopStreaming();
+        
+        if ( tries++ >= maxTries ) [[unlikely]]
+        {
+            clog << "V4L2Cam::tryAndStopStreaming: cannot stop streaming!"
+                    
+                 << endl;
+            
+            if ( hard )
+            {
+                clog << " KILLING THIS PROCESS!!!"
+                     << endl;
+                
+                std::abort();
+            }
+            
+            clog << endl;
+            
+            return false;
+        }
+    }
+    
+    return true;
+}
+
+
+void V4L2Cam::uninitialize()
+{
+    if (    state != State::UNINITIALIZED
+         && state != State::DEVICE_KNOWN
+         && state != State::INITIALIZED
+       ) [[unlikely]]
+    {
+        clog << "V4L2Cam::uninitialize: not in a correct state (UNINITIALIZED|"
+                "DEVICE_KNOWN|INITIALIZED) to fully uninitialize!"
+             << endl;
+        
+        return;
+    }
+    
     
     _uninitialize();
     

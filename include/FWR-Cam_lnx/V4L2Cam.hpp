@@ -267,6 +267,10 @@ protected:
 public:
     // mind the declaration order of the following set of functions *hint* *hint* *wink*
     
+    inline
+    bool isJustInitialized() const noexcept { return state == State::INITIALIZED; }
+    bool goIntoInitializedState() noexcept;
+    
     bool locateDeviceNodeAndInitialize();
     
     bool usingMemoryType(MemoryType) noexcept;
@@ -280,7 +284,8 @@ public:
                                              // index correctly, too
     
     bool startStreaming() noexcept;
-    bool    isStreaming() noexcept { return state == State::STREAMING; }
+    bool    isStreaming() noexcept { return    state == State::STREAMING
+                                            || state == State::DEQUEUEING; }
     bool  fillBuffer   (v4l2_buffer&) noexcept; // nulls and preps the arg, then blocks for a frame
     bool           wake()             noexcept; // to interrupt fillBuffer
     bool  stopStreaming() noexcept;
@@ -354,7 +359,7 @@ private:
     void    reapplySettings();
     
     void resetCrop(FD_t const&);
-    // bool isMemoryTypeSupported(FD_t const&, v4l2_buf_type, v4l2_memory);
+    bool isSetMemoryTypeSupported() noexcept;
     bool determineMaxBufferSizeNeeded(FD_t const&);
     void determineSettingDomains(FD_t const& fd);
     void queryControlDomain(FD_t const& fd, uint32_t controlID, bool& domainKnown,
@@ -363,6 +368,8 @@ private:
     std::shared_ptr<FD_t> produceV4L2FD();
     bool                     openV4L2FD(); // locateDevice...() has that effect, too
     void                    closeV4L2FD();
+    
+    bool tryAndStopStreaming(bool hard = false) noexcept;
     
     void uninitialize();
     bool rebindUSBDevice();
