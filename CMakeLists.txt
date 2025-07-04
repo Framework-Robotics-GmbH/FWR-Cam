@@ -43,6 +43,21 @@ project(FWR_Cam_lnx VERSION ${PROJECT_VERSION} LANGUAGES CXX)
 set(FWR_Cam_lnx_VERSION ${PROJECT_VERSION} CACHE INTERNAL "FWR_Cam_lnx version")
 set(FWR_Cam_lnx_VERSION_SUFFIX ${PROJECT_VERSION_SUFFIX} CACHE INTERNAL "FWR_Cam_lnx version suffix")
 
+# === Version Header Configuration ===
+if(PROJECT_VERSION_SUFFIX STREQUAL "")
+    set(FWR_FPBASE_FULL_VERSION ${PROJECT_VERSION})
+    set(CPACK_FULL_VERSION ${PROJECT_VERSION})
+else()
+    set(FWR_FPBASE_FULL_VERSION "${PROJECT_VERSION}-${PROJECT_VERSION_SUFFIX}")
+    set(CPACK_FULL_VERSION "${PROJECT_VERSION}_${PROJECT_VERSION_SUFFIX}")
+endif()
+
+configure_file(
+    "${CMAKE_SOURCE_DIR}/include/FWR-Cam_lnx/Version.hpp.in"
+    "${CMAKE_SOURCE_DIR}/include/FWR-Cam_lnx/Version.gen.hpp"
+    @ONLY
+)
+
 # === Build Options ===
 # BUILD_SHARED_LIBS is built-in: if ON, builds a shared library.
 if(BUILD_SHARED_LIBS)
@@ -66,21 +81,6 @@ else()
     message(STATUS "Found videodev2.h: ${VIDEODEV2_HEADER}")
 endif()
 
-# === Version Header Configuration ===
-if(PROJECT_VERSION_SUFFIX STREQUAL "")
-    set(FWR_FPBASE_FULL_VERSION ${PROJECT_VERSION})
-    set(CPACK_FULL_VERSION ${PROJECT_VERSION})
-else()
-    set(FWR_FPBASE_FULL_VERSION "${PROJECT_VERSION}-${PROJECT_VERSION_SUFFIX}")
-    set(CPACK_FULL_VERSION "${PROJECT_VERSION}_${PROJECT_VERSION_SUFFIX}")
-endif()
-
-configure_file(
-    "${CMAKE_SOURCE_DIR}/include/FWR-Cam_lnx/Version.hpp.in"
-    "${CMAKE_SOURCE_DIR}/include/FWR-Cam_lnx/Version.gen.hpp"
-    @ONLY
-)
-
 # === Source File Collection ===
 file(GLOB_RECURSE SOURCES "${CMAKE_SOURCE_DIR}/source/FWR-Cam_lnx/*.cpp")
 
@@ -89,6 +89,7 @@ add_library(FWR_Cam_lnxLib ${LIB_TYPE} ${SOURCES})
 # add_dependencies(FWR_Cam_lnxLib GenerateFourCCHeader)
 
 set_target_properties(FWR_Cam_lnxLib PROPERTIES
+    OUTPUT_NAME "FWR-Cam_lnx"
     VERSION "${PROJECT_VERSION}"
     SOVERSION "${PROJECT_VERSION}"
     CXX_STANDARD 20
@@ -112,6 +113,14 @@ target_include_directories(FWR_Cam_lnxLib PUBLIC
     $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/third_party/magic_enum/include>
 )
 
+find_library(LIBUSB_LIB usb-1.0 REQUIRED)
+find_library(LIBUDEV_LIB udev REQUIRED)
+
+target_link_libraries(FWR_Cam_lnxLib
+    ${LIBUSB_LIB}
+    ${LIBUDEV_LIB}
+)
+
 # === Installation Rules ===
 install(TARGETS FWR_Cam_lnxLib
     EXPORT FWR_Cam_lnxTargets
@@ -121,11 +130,11 @@ install(TARGETS FWR_Cam_lnxLib
 )
 
 configure_file(
-    "${CMAKE_SOURCE_DIR}/cmake/FWR_Cam_lnx.pc.in"
-    "${CMAKE_BINARY_DIR}/FWR_Cam_lnx.pc"
+    "${CMAKE_SOURCE_DIR}/cmake/FWR-Cam_lnx.pc.in"
+    "${CMAKE_BINARY_DIR}/FWR-Cam_lnx.pc"
     @ONLY
 )
-install(FILES "${CMAKE_BINARY_DIR}/FWR_Cam_lnx.pc"
+install(FILES "${CMAKE_BINARY_DIR}/FWR-Cam_lnx.pc"
     DESTINATION lib/pkgconfig
 )
 
@@ -144,7 +153,7 @@ install(FILES
 install(EXPORT FWR_Cam_lnxTargets
     FILE FWR_Cam_lnxTargets.cmake
     NAMESPACE FWR_Cam_lnx::
-    DESTINATION lib/cmake/FWR-Cam_lnx
+    DESTINATION lib/cmake/FWR_Cam_lnx
 )
 
 # Install the package configuration files.
@@ -152,11 +161,11 @@ include(CMakePackageConfigHelpers)
 configure_package_config_file(
     "${CMAKE_SOURCE_DIR}/cmake/FWR_Cam_lnxConfig.cmake.in"
     "${CMAKE_BINARY_DIR}/FWR_Cam_lnxConfig.cmake"
-    INSTALL_DESTINATION lib/cmake/FWR-Cam_lnx
+    INSTALL_DESTINATION lib/cmake/FWR_Cam_lnx
 )
 install(FILES
     "${CMAKE_BINARY_DIR}/FWR_Cam_lnxConfig.cmake"
-    DESTINATION lib/cmake/FWR-Cam_lnx
+    DESTINATION lib/cmake/FWR_Cam_lnx
 )
 write_basic_package_version_file(
     "${CMAKE_BINARY_DIR}/FWR_Cam_lnxConfigVersion.cmake"
@@ -164,7 +173,7 @@ write_basic_package_version_file(
     COMPATIBILITY AnyNewerVersion
 )
 install(FILES "${CMAKE_BINARY_DIR}/FWR_Cam_lnxConfigVersion.cmake"
-    DESTINATION lib/cmake/FWR-Cam_lnx
+    DESTINATION lib/cmake/FWR_Cam_lnx
 )
 
 # Install additional documentation and license files.

@@ -5,7 +5,7 @@
 !/.github/workflows/auto_release_on_vTag.yml
 
 !/cmake/
-!/cmake/FWR_Cam_lnx.pc.in
+!/cmake/FWR-Cam_lnx.pc.in
 !/cmake/FWR_Cam_lnxConfig.cmake.in
 
 !/include/
