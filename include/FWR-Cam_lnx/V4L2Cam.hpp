@@ -265,6 +265,8 @@ protected:
     using ssrc = SettingSource;
     
 public:
+    virtual ~V4L2Cam();
+    
     // mind the declaration order of the following set of functions *hint* *hint* *wink*
     
     inline
@@ -329,7 +331,6 @@ public:
 
 protected:
     V4L2Cam(std::string const& serialNo) noexcept;
-    virtual ~V4L2Cam();
 
     V4L2Cam           (V4L2Cam const& ) = delete;
     V4L2Cam& operator=(V4L2Cam const& ) = delete;
@@ -352,7 +353,7 @@ private:
     
     virtual bool _locateDeviceNodeAndInitialize( udev       * uDev
                                                , udev_device* parentDev
-                                               );
+                                               ) = 0;
     
     // only to be used by locateDeviceNodeAndInitialize()
     void initializeSettings();
