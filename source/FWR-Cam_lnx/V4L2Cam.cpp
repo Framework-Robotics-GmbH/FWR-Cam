@@ -433,13 +433,10 @@ bool V4L2Cam::requestBufferQueue(uint32_t count) noexcept
     }
     
     
-    v4l2_requestbuffers req = { .count  = count
-                              , .type   = bufType
-                              , .memory = memType
-                              , .capabilities{}
-                              , .flags{}
-                              , .reserved{}
-                              };
+    v4l2_requestbuffers req{};
+    req.count  = count;
+    req.type   = bufType;
+    req.memory = memType;
     
     if ( !xioctl(*fd_ptr, VIDIOC_REQBUFS, &req) ) [[unlikely]]
     {
@@ -697,7 +694,7 @@ bool V4L2Cam::fillBuffer(v4l2_buffer& buf) noexcept
            ) [[unlikely]]
         {
             uint64_t dummy;
-            read(*evntFD, &dummy, sizeof(dummy));
+            dummy = read(*evntFD, &dummy, sizeof(dummy));
             
             clog << "V4L2Cam::fillBuffer: so. wrote to my eventfd to wake me!?"
                  << endl;
@@ -773,7 +770,17 @@ bool V4L2Cam::wake() noexcept
     
     
     uint64_t one = 1;
-    write(*evntFD, &one, sizeof(one));
+    auto bytesWritten = write(*evntFD, &one, sizeof(one));
+    
+    if ( bytesWritten != sizeof(one) ) [[unlikely]]
+    {
+        int err = errno;
+        clog << "V4L2Cam::wake: write to eventfd failed with errno "
+             << err << " (" << strerror(err) << ")"
+             << endl;
+        
+        return false;
+    }
     
     return true;
 }
@@ -877,13 +884,10 @@ bool V4L2Cam::releaseBufferQueue() noexcept
     }
     
     
-    v4l2_requestbuffers req = { .count  = 0
-                              , .type   = bufType
-                              , .memory = memType
-                              , .capabilities{}
-                              , .flags{}
-                              , .reserved{}
-                              };
+    v4l2_requestbuffers req{};
+    req.count  = 0;
+    req.type   = bufType;
+    req.memory = memType;
     
     if ( !xioctl( *fd_ptr
                 , VIDIOC_REQBUFS
@@ -1491,13 +1495,10 @@ bool V4L2Cam::isSetMemoryTypeSupported() noexcept
     }
     
     
-    v4l2_requestbuffers req = { .count  = 0
-                              , .type   = bufType
-                              , .memory = memType
-                              , .capabilities{}
-                              , .flags{}
-                              , .reserved{}
-                              };
+    v4l2_requestbuffers req{};
+    req.count  = 0;
+    req.type   = bufType;
+    req.memory = memType;
     
     if ( !xioctl(*fd_ptr, VIDIOC_REQBUFS, &req) ) [[unlikely]]
     {
