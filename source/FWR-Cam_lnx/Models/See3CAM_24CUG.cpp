@@ -118,6 +118,15 @@ string_view const& See3CAM_24CUG::produceVendorID()  noexcept { return   ECON_VI
 string_view const& See3CAM_24CUG::produceProductID() noexcept { return CAMERA_PID; }
 
 
+bool See3CAM_24CUG::gatherSerialNumbers(vector<string>& serials) noexcept
+{
+    return V4L2Cam::gatherSerialNumbers(   ECON_VID
+                                       , CAMERA_PID
+                                       , serials
+                                       );
+}
+
+
 bool See3CAM_24CUG::_locateDeviceNodeAndInitialize( udev       * uDev
                                                   , udev_device* parentDev
                                                   )

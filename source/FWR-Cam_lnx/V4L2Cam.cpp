@@ -19,6 +19,7 @@
 #include <fstream>
 #include <thread>
 #include <cstring>
+#include <algorithm>
 
 #include <fcntl.h> /* low-level i/o */
 // #include <unistd.h>
@@ -183,7 +184,7 @@ bool V4L2Cam::locateDeviceNodeAndInitialize()
     }
     
     udev_enumerate* enumerate = udev_enumerate_new(uDev);
-    if ( !enumerate )
+    if ( !enumerate ) [[unlikely]]
     {
         clog << "V4L2Cam::locateDeviceNodeAndInitialize: udev_enumerate_new "
                 "failed"
@@ -198,28 +199,36 @@ bool V4L2Cam::locateDeviceNodeAndInitialize()
     
     udev_list_entry* devices = udev_enumerate_get_list_entry(enumerate);
     
-    udev_device* dev{};
+    udev_device    * dev{};
     udev_list_entry* dev_list_entry;
-    udev_list_entry_foreach(dev_list_entry, devices)
+    
+    udev_list_entry_foreach( dev_list_entry, devices )
     {
         if ( dev )
             udev_device_unref(dev);
         
         const char *path = udev_list_entry_get_name(dev_list_entry);
+        
         if ( !path ) [[unlikely]]
             continue;
         
         dev = udev_device_new_from_syspath(uDev, path);
+        
         if ( !dev )
             continue;
         
-        udev_device* pdev = udev_device_get_parent_with_subsystem_devtype
-                            (dev, "usb", "usb_device");
+        udev_device*
+        pdev = udev_device_get_parent_with_subsystem_devtype( dev
+                                                            , "usb"
+                                                            , "usb_device"
+                                                            );
+        
         if ( !pdev )
             continue;
         
         const char *vendor  = udev_device_get_sysattr_value(pdev, "idVendor");
         const char *product = udev_device_get_sysattr_value(pdev, "idProduct");
+        
         if (                !vendor ||              !product
              || vendorID !=  vendor || productID !=  product
            )
@@ -228,16 +237,19 @@ bool V4L2Cam::locateDeviceNodeAndInitialize()
         product_found = true;
         
         const char *sn = udev_device_get_sysattr_value(pdev, "serial");
+        
         if ( !sn || serialNo != sn )
             continue;
         
         serial_found = true;
         
         char const* dev_path = udev_device_get_devnode(dev);
+        
         if ( !dev_path )
             continue;
         
         FD_t fd{xopen(dev_path, O_RDWR | O_NONBLOCK)};
+        
         if ( !fd )
         {
             clog << "V4L2Cam::locateDeviceNodeAndInitialize: Could not open "
@@ -248,6 +260,7 @@ bool V4L2Cam::locateDeviceNodeAndInitialize()
         }
         
         v4l2_capability cap{};
+        
         if ( !xioctl(fd, VIDIOC_QUERYCAP, &cap) )
         {
             clog << "V4L2Cam::locateDeviceNodeAndInitialize: VIDIOC_QUERYCAP "
@@ -1229,6 +1242,94 @@ V4L2Cam::~V4L2Cam() noexcept
     evntFD->close_fd();
 }
 
+
+bool V4L2Cam::gatherSerialNumbers( string_view      vendorID
+                                 , string_view     productID
+                                 , vector<string>& serials
+                                 ) noexcept
+{
+    serials.clear();
+
+    udev *uDev = udev_new();
+    
+    if ( !uDev ) [[unlikely]]
+    {
+        clog << "V4L2Cam::gatherSerialNumbers: udev does not work"
+             << endl;
+        
+        return false;
+    }
+    
+    udev_enumerate *enumerate = udev_enumerate_new(uDev);
+    
+    if ( !enumerate ) [[unlikely]]
+    {
+        clog << "V4L2Cam::gatherSerialNumbers: udev_enumerate_new failed"
+             << endl;
+        
+        udev_unref(uDev);
+        return false;
+    }
+    
+    udev_enumerate_add_match_subsystem(enumerate, "video4linux");
+    udev_enumerate_scan_devices(enumerate);
+    
+    udev_list_entry* devices = udev_enumerate_get_list_entry(enumerate);
+    
+    udev_device    * dev{};
+    udev_list_entry* dev_list_entry;
+    
+    udev_list_entry_foreach( dev_list_entry, devices )
+    {
+        if ( dev )
+            udev_device_unref(dev);
+        
+        const char *path = udev_list_entry_get_name(dev_list_entry);
+        
+        if ( !path )
+            continue;
+        
+        dev = udev_device_new_from_syspath(uDev, path);
+        
+        if ( !dev )
+            continue;
+        
+        udev_device*
+        pdev = udev_device_get_parent_with_subsystem_devtype( dev
+                                                            , "usb"
+                                                            , "usb_device"
+                                                            );
+        
+        if ( !pdev )
+            continue;
+        
+        const char *vendor  = udev_device_get_sysattr_value(pdev, "idVendor");
+        const char *product = udev_device_get_sysattr_value(pdev, "idProduct");
+        
+        if (                !vendor ||              !product
+             || vendorID !=  vendor || productID !=  product
+           )
+            continue;
+        
+        const char *sn = udev_device_get_sysattr_value(pdev, "serial");
+        
+        if ( sn && *sn )
+            serials.emplace_back(sn);
+    }
+    if ( dev )
+        udev_device_unref(dev);
+    
+    udev_enumerate_unref(enumerate);
+    udev_unref(uDev);
+    
+    ranges::sort(serials);
+    auto [first, last] = ranges::unique(serials);
+    serials.erase(last, serials.end());
+    
+    return !serials.empty();
+}
+
+
 int32_t V4L2Cam::xioctl( FD_t const& fd
                        , uint64_t    request
                        , void*       arg
@@ -1743,7 +1844,10 @@ bool V4L2Cam::tryAndStopStreaming(bool hard) noexcept
                 clog << " KILLING THIS PROCESS!!!"
                      << endl;
                 
-                std::abort();
+                // allow time for log output/publishing
+                this_thread::sleep_for(chrono::milliseconds(100));
+                
+                abort();
             }
             
             clog << endl;

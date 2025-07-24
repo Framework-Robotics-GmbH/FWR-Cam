@@ -13,6 +13,7 @@
 #pragma once
 
 #include <array>
+#include <vector>
 #include <string>
 #include <string_view>
 #include <optional>
@@ -267,6 +268,12 @@ protected:
 public:
     virtual ~V4L2Cam();
     
+    
+    inline std::string const& produceSerialNo() const noexcept { return serialNo; }
+    inline bool               isUninitialized() const noexcept { return state ==
+                                                                        State::UNINITIALIZED;
+                                                               }
+    
     // mind the declaration order of the following set of functions *hint* *hint* *wink*
     
     inline
@@ -336,6 +343,12 @@ protected:
     V4L2Cam& operator=(V4L2Cam const& ) = delete;
     V4L2Cam           (V4L2Cam      &&) = delete;
     V4L2Cam& operator=(V4L2Cam      &&) = delete;
+    
+    
+    static bool gatherSerialNumbers( std::string_view           vendorID
+                                   , std::string_view          productID
+                                   , std::vector<std::string>& serials
+                                   ) noexcept;
     
 
     int32_t xioctl( FD_t const& fd

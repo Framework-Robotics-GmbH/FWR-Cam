@@ -14,6 +14,7 @@
 
 #include <string>
 #include <optional>
+#include <vector>
 #include <array>
 #include <cstdint>    // For fixed-width integer types like uint8_t
 
@@ -79,6 +80,8 @@ public:
     
     static std::string_view const& produceVendorID () noexcept;
     static std::string_view const& produceProductID() noexcept;
+    
+    static bool gatherSerialNumbers(std::vector<std::string>& serials) noexcept;
     
 private:
     inline virtual std::string_view const& _produceVendorID () noexcept override
