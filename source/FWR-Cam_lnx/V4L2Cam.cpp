@@ -73,24 +73,39 @@ void V4L2CamData::FD_t::close_fd()
     
     int32_t result;
     
-    for ( int32_t attempt = 0; attempt < retry_count; ++attempt )
+    for ( int32_t attempt = 0
+        ;    value   > -1
+          && attempt < retry_count
+        ; ++attempt
+        )
     {
         errno = 0;
         
         result = ::close(value);
         
         if ( result == 0 )
-            return;
-        
-        if ( errno == EINTR ) {
+            value = -1;
+        else if ( errno == EINTR )
+        {
             if ( attempt < retry_count - 1 )
             {
                 this_thread::sleep_for(chrono::milliseconds(delay_ms++));
                 continue;
-            } else
-                return;
-        } else
-            return;
+            }
+            else
+                value = -1;
+        }
+        else
+            value = -1;
+    }
+    
+    if ( value > -1 ) [[unlikely]]
+    {
+        clog << "V4L2CamData::FD_t::close_fd: could not close the file descriptor. "
+                "Just dropping it."
+             << endl;
+        
+        value = -1;
     }
 }
 

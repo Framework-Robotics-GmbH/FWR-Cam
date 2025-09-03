@@ -72,27 +72,36 @@ struct V4L2CamData
                            };
     
     // file descriptor helper struct
-    struct FD_t {
+    struct FD_t
+    {
         FD_t() = default;
         explicit FD_t(int32_t fd) : value(fd) {}
+        
         FD_t(FD_t&& other) noexcept : value(std::exchange(other.value, -1)) {}
-        FD_t& operator=(FD_t&& other) noexcept {
-            if (this != &other) {
+        FD_t& operator=(FD_t&& other) noexcept
+        {
+            if ( this != &other )
+            {
                 close_fd();
                 value = std::exchange(other.value, -1);
             }
             return *this;
         }
-        FD_t(const FD_t&) = delete;
+        
+        FD_t(const FD_t&)            = delete;
         FD_t& operator=(const FD_t&) = delete;
+        
         ~FD_t() { close_fd(); }
         
         void close_fd();
         
         operator int32_t() const { return value; }
         operator bool()    const { return value > -1; }
-        FD_t& operator=(int32_t const new_fd) {
-            if ( value != new_fd ) {
+        
+        FD_t& operator=(int32_t const new_fd)
+        {
+            if ( value != new_fd )
+            {
                 close_fd();
                 value = new_fd;
             }

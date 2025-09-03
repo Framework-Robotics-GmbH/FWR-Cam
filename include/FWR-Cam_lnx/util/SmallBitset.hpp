@@ -29,7 +29,7 @@ namespace FWR::Cam_lnx
 template <size_t N>
 class SmallBitset
 {
-    static_assert(N > 0 && N <= sizeof(size_t), "Only supports 1 <= N <= 64");
+    static_assert(N > 0 && N <= sizeof(size_t) * 8, "Only supports 1 <= N <= 64");
 public:
     using value_t = std::conditional_t
                     < (N <= 8)
