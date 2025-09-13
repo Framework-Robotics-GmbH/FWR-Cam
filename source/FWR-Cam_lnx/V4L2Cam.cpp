@@ -20,6 +20,7 @@
 #include <thread>
 #include <cstring>
 #include <algorithm>
+#include <ranges>
 
 #include <fcntl.h> /* low-level i/o */
 // #include <unistd.h>
@@ -56,7 +57,7 @@ using namespace magic_enum;
 // };
 
 
-V4L2CamData::V4L2CamData(std::string const& sNo) noexcept
+V4L2CamData::V4L2CamData(string const& sNo) noexcept
  :  serialNo(sNo)
  ,  evntFD(make_shared<FD_t>(eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC)))
 {
@@ -1241,13 +1242,13 @@ bool V4L2Cam::helper_queryctrl( uint32_t id
 */
 
 
-V4L2Cam::V4L2Cam(std::string const& sNo) noexcept
+V4L2Cam::V4L2Cam(string const& sNo) noexcept
  :  V4L2CamData(sNo)
 {}
 
 V4L2Cam::~V4L2Cam() noexcept
 {
-    tryAndStopStreaming(true); // std::aborts, if it doesn't work out!
+    tryAndStopStreaming(true); // aborts, if it doesn't work out!
     
     if ( state == State::BUFFER_QUEUE_PREPPED ) [[unlikely]]
         releaseBufferQueue();
@@ -1331,15 +1332,18 @@ bool V4L2Cam::gatherSerialNumbers( string_view      vendorID
         if ( sn && *sn )
             serials.emplace_back(sn);
     }
+    clog << flush;
+    
     if ( dev )
         udev_device_unref(dev);
+    
     
     udev_enumerate_unref(enumerate);
     udev_unref(uDev);
     
-    ranges::sort(serials);
-    auto [first, last] = ranges::unique(serials);
-    serials.erase(last, serials.end());
+    std::ranges::sort(serials);
+    auto new_end = std::ranges::unique(serials).begin();
+    serials.erase(new_end, serials.end());
     
     return !serials.empty();
 }

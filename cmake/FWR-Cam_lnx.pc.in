@@ -6,5 +6,5 @@ includedir=${prefix}/include
 Name: FWR-Cam_lnx
 Description: 3-clause-BSD-licensed camera abstraction library
 Version: @PROJECT_VERSION@
-Libs: -L${libdir} -lFWR_Cam_lnxLib
+Libs: -L${libdir} -lFWR-Cam_lnx
 Cflags: -I${includedir}

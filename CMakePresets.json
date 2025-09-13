@@ -14,6 +14,17 @@
       }
     },
     {
+      "name": "default-debug",
+      "description": "Default debug build with shared library",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/install-debug",
+        "BUILD_SHARED_LIBS": "ON"
+      }
+    },
+    {
       "name": "rpi-aarch64",
       "description": "Cross-compile release build for Raspberry Pi (64-bit)",
       "generator": "Ninja",
@@ -34,6 +45,11 @@
       "name": "default",
       "description": "Build using Ninja in the configured build directory",
       "configurePreset": "default"
+    },
+    {
+      "name": "default-debug",
+      "description": "Build using Ninja in the configured build directory",
+      "configurePreset": "default-debug"
     },
     {
       "name": "rpi-aarch64",

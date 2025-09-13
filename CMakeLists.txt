@@ -88,10 +88,25 @@ file(GLOB_RECURSE SOURCES "${CMAKE_SOURCE_DIR}/source/FWR-Cam_lnx/*.cpp")
 add_library(FWR_Cam_lnxLib ${LIB_TYPE} ${SOURCES})
 # add_dependencies(FWR_Cam_lnxLib GenerateFourCCHeader)
 
+string(REPLACE "." ";" VERSION_PARTS "${PROJECT_VERSION}")
+list(GET VERSION_PARTS 0 PROJECT_VERSION_MAJOR)
+list(GET VERSION_PARTS 1 PROJECT_VERSION_MINOR)
+list(GET VERSION_PARTS 2 PROJECT_VERSION_PATCH)
+
+# Define SOVERSION scheme:
+# - If major == 0 → soversion = major.minor
+# - Else           → soversion = major
+if(PROJECT_VERSION_MAJOR EQUAL 0)
+    set(FWR_Cam_lnx_SOVERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
+else()
+    set(FWR_Cam_lnx_SOVERSION "${PROJECT_VERSION_MAJOR}")
+endif()
+
+
 set_target_properties(FWR_Cam_lnxLib PROPERTIES
     OUTPUT_NAME "FWR-Cam_lnx"
     VERSION "${PROJECT_VERSION}"
-    SOVERSION "${PROJECT_VERSION}"
+    SOVERSION "${FWR_Cam_lnx_SOVERSION}"
     CXX_STANDARD 20
     CXX_STANDARD_REQUIRED YES
     LICENSE "Open source, 3-clause BSD - see LICENSE file"
