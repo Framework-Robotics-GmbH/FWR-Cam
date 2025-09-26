@@ -409,6 +409,8 @@ private:
     bool decideBufferType(uint32_t& bufType) noexcept;
     bool decideMemoryType(uint32_t& memType) noexcept;
     
+    bool superObjectCannotExist{true};
+    
     
     // settings helpers //
     

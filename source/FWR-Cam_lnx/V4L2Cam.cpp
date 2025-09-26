@@ -172,13 +172,14 @@ bool V4L2Cam::goIntoInitializedState() noexcept
 
 bool V4L2Cam::locateDeviceNodeAndInitialize()
 {
-    if (    state != State::INITIALIZED
+    if (    state != State::UNINITIALIZED
          && state != State::DEVICE_KNOWN
        ) [[unlikely]]
     {
         clog << "V4L2Cam::locateDeviceNodeAndInitialize: already initialized. "
                 "no extrawurst!"
              << endl;
+        
         return true;
     }
     
@@ -1244,10 +1245,14 @@ bool V4L2Cam::helper_queryctrl( uint32_t id
 
 V4L2Cam::V4L2Cam(string const& sNo) noexcept
  :  V4L2CamData(sNo)
-{}
+{
+    superObjectCannotExist = false;
+}
 
 V4L2Cam::~V4L2Cam() noexcept
 {
+    superObjectCannotExist = true;
+    
     tryAndStopStreaming(true); // aborts, if it doesn't work out!
     
     if ( state == State::BUFFER_QUEUE_PREPPED ) [[unlikely]]
@@ -1894,7 +1899,8 @@ void V4L2Cam::uninitialize()
     }
     
     
-    _uninitialize();
+    if ( !superObjectCannotExist ) [[  likely]]
+        _uninitialize();
     
     closeV4L2FD();
     v4l2Path.clear();
