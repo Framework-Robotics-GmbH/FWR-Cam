@@ -321,10 +321,17 @@ bool V4L2Cam::locateDeviceNodeAndInitialize()
             
             v4l2FD = make_shared<FD_t>(move(fd));
             
+            clog << "V4L2Cam::locateDeviceNodeAndInitialize: found:\n"
+                    "\tv4l2Path\t: "         << v4l2Path         << "\n"
+                    "\tUSBKernelName\t: "    << USBKernelName    << "\n"
+                    "\tUSBBusNumber\t: "     << USBBusNumber     << "\n"
+                    "\tUSBDeviceAddress\t: " << USBDeviceAddress
+                 << endl;
+            
             if ( state == State::UNINITIALIZED )
             {
-                determineSettingDomains(fd);
-                determineMaxBufferSizeNeeded(fd);
+                determineSettingDomains(*v4l2FD);
+                determineMaxBufferSizeNeeded(*v4l2FD);
                 
                 initializeSettings();
                 
@@ -1354,33 +1361,50 @@ bool V4L2Cam::gatherSerialNumbers( string_view      vendorID
 }
 
 
-int32_t V4L2Cam::xioctl( FD_t const& fd
-                       , uint64_t    request
-                       , void*       arg
-                       , bool        quasi_blocking
-                       )
+bool V4L2Cam::xioctl( FD_t const& fd
+                    , uint64_t    request
+                    , void*       arg
+                    , bool        quasi_blocking
+                    )
 {
-    constexpr uint8_t retry_count = 5;
-    uint8_t busy_count{};
+    using namespace std::chrono;
+    using namespace std::chrono_literals;
+    
+    constexpr uint8_t retry_count = 8;
+    uint8_t           busy_count{};
+    auto const        deadline    = steady_clock::now() + 1s;
     
     int r;
     
     do {
         errno = 0;
         
-        r = ioctl(fd, request, arg);
+        r = ioctl( static_cast<int>(fd)
+                 , static_cast<unsigned long>(request)
+                 , arg
+                 );
         
-        if (    r == -1
-             && errno == EBUSY
-           )
+        if ( r == -1 )
         {
-            if      ( busy_count == 0 )
-                this_thread::yield();
-            else if ( busy_count  < retry_count )
-                this_thread::sleep_for(chrono::milliseconds(busy_count++));
-            else {
+            if ( steady_clock::now() >= deadline ) [[unlikely]]
                 break;
+            
+            if ( errno == EBUSY )
+            {
+                if      ( busy_count == 0 )
+                    this_thread::yield();
+                else if (    quasi_blocking
+                          || busy_count  < retry_count
+                        )
+                    this_thread::sleep_for
+                    (milliseconds(1u << std::min<uint8_t>(busy_count, 7)));
+                else
+                    break;
+                
+                busy_count++;
             }
+            else if ( errno == EAGAIN && quasi_blocking )
+                this_thread::sleep_for(1ms);
         }
     } while ( r == -1 && (      errno == EINTR
                            ||   errno == EBUSY
@@ -1479,7 +1503,13 @@ int32_t V4L2Cam::xioctl( FD_t const& fd
         }
     }
     
-    return r == 0;
+    if ( r == -1 )
+    {
+        clog << "V4L2Cam::xioctl: error occured. given request: " << to_string(request)
+             << endl;
+    }
+    
+    return r != -1;
 }
 
 int32_t V4L2Cam::xopen( char    const* pathname

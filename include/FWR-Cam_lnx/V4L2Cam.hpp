@@ -360,11 +360,11 @@ protected:
                                    ) noexcept;
     
 
-    int32_t xioctl( FD_t const& fd
-                  , uint64_t    request
-                  , void*       arg
-                  , bool        quasi_blocking = false
-                  );
+    bool xioctl( FD_t const& fd
+               , uint64_t    request
+               , void*       arg
+               , bool        quasi_blocking = false
+               );
     static int32_t xopen( char    const* pathname
                         , int32_t const  flags
                         );

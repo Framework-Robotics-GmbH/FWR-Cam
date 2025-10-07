@@ -176,6 +176,7 @@ bool See3CAM_24CUG::_locateDeviceNodeAndInitialize( udev       * uDev
         }
         
         hidPath = dev_path;
+        
         hidFD = make_shared<FD_t>(move(fd));
         initializeSettings();
         closeHIDFD();
@@ -239,7 +240,7 @@ bool See3CAM_24CUG::openHIDFD() {
 }
 
 void See3CAM_24CUG::closeHIDFD() {
-    if ( !hidFD || !*hidFD )
+    if ( hidFD && *hidFD )
         hidFD->close_fd();
     
     hidFD.reset();
@@ -320,6 +321,8 @@ bool See3CAM_24CUG::sendHidCmd( uint8_t* outBuf
                               , uint32_t    len
                               )
 {
+    using namespace std::chrono;
+    
     auto fd_ptr = produceHIDFD();
     
     if ( !fd_ptr || !*fd_ptr ) [[unlikely]]
@@ -327,24 +330,31 @@ bool See3CAM_24CUG::sendHidCmd( uint8_t* outBuf
     
     ssize_t written_bytes = 0;
     
-    while ( written_bytes < len ) {
+    while ( written_bytes < static_cast<ssize_t>(len) )
+    {
         ssize_t result = write( *fd_ptr
                               , outBuf + written_bytes
                               ,    len - written_bytes
                               );
         
-        if ( result < 0 ) {
-            if ( errno == EINTR || errno == EAGAIN ) {
-                this_thread::sleep_for(chrono::milliseconds(1));
+        if ( result < 0 )
+        {
+            if ( errno == EINTR || errno == EAGAIN )
+            {
+                this_thread::sleep_for(milliseconds(1));
                 continue;
-            } else if ( errno == EIO ) {
+            }
+            else if ( errno == EIO )
+            {
                 // Optionally implement a retry mechanism here
                 clog << "See3CAM_24CUG::sendHidCmd: Write I/O error: "
                      << strerror(errno)
                      << endl;
                 
                 return false;
-            } else {
+            }
+            else
+            {
                 clog << "See3CAM_24CUG::sendHidCmd: Write error: "
                      << strerror(errno)
                      << endl;
@@ -356,16 +366,12 @@ bool See3CAM_24CUG::sendHidCmd( uint8_t* outBuf
         written_bytes += result;
     }
     
-    auto end_time = chrono::steady_clock::now() + chrono::seconds(5);
+    auto const end_time = steady_clock::now() + seconds(5);
     
     // Wait for data availability using select
-    while ( true ) {
-        struct timeval tv;
-        fd_set rfds;
-        FD_ZERO(&rfds);
-        FD_SET(static_cast<int>(*fd_ptr), &rfds);
-        
-        auto now = chrono::steady_clock::now();
+    while ( true )
+    {
+        auto now = steady_clock::now();
         
         if ( now >= end_time ) {
             clog << "See3CAM_24CUG::sendHidCmd: Timeout waiting for data from "
@@ -375,11 +381,14 @@ bool See3CAM_24CUG::sendHidCmd( uint8_t* outBuf
             return false;
         }
         
-        auto remaining_time = chrono::duration_cast
-                              <chrono::microseconds>
-                              (end_time - now);
-        tv.tv_sec  = remaining_time.count() / 1'000'000;
-        tv.tv_usec = remaining_time.count() % 1'000'000;
+        timeval tv{};
+        fd_set  rfds;
+        FD_ZERO(&rfds);
+        FD_SET(static_cast<int>(*fd_ptr), &rfds);
+        
+        auto const remaining_time = duration_cast<microseconds>(end_time - now);
+        tv.tv_sec  = static_cast<     time_t>(remaining_time.count() / 1'000'000);
+        tv.tv_usec = static_cast<suseconds_t>(remaining_time.count() % 1'000'000);
         
         int32_t select_result = select( *fd_ptr + 1
                                       , &rfds
@@ -388,9 +397,12 @@ bool See3CAM_24CUG::sendHidCmd( uint8_t* outBuf
                                       , &tv
                                       );
         
-        if ( select_result < 0 ) {
-            if ( errno == EINTR ) {
-                this_thread::sleep_for(chrono::milliseconds(1));
+        if ( select_result < 0 )
+        {
+            if ( errno == EINTR )
+            {
+                this_thread::sleep_for(milliseconds(1));
+                
                 continue;
             }
             
@@ -399,75 +411,64 @@ bool See3CAM_24CUG::sendHidCmd( uint8_t* outBuf
                  << endl;
             
             return false;
-        } else if ( select_result == 0 ) {
-            clog << "See3CAM_24CUG::sendHidCmd: Timeout waiting for data from "
-                    "HID device."
-                 << endl;
-            
-            return false;
         }
+        else if ( select_result == 0 )
+            continue; // just run into timeout test at loop start
         
         // Data is available for reading
         break;
     }
     
-    ssize_t read_bytes = 0;
     
-    while ( read_bytes < len ) {
-        int32_t available_bytes = 0;
+    while ( true )
+    {
+        ssize_t const read_result = read( *fd_ptr
+                                        , inBuf
+                                        , len
+                                        );
         
-        // Check how many bytes are available
-        if ( xioctl(*fd_ptr, FIONREAD, &available_bytes) != 0 ) {
-            clog << "See3CAM_24CUG::sendHidCmd: ioctl error: "
-                 << strerror(errno)
+        if ( read_result < 0 )
+        {
+            if ( errno == EINTR || errno == EAGAIN )
+            {
+                this_thread::sleep_for(milliseconds(1));
+                
+                continue;
+            }
+            
+            if ( errno == EIO )
+            {
+                // Optionally implement a retry mechanism here
+                clog << "See3CAM_24CUG::sendHidCmd: Read I/O error: "
+                     << strerror(errno)
+                     << endl;
+                
+                return false;
+            }
+            else
+            {
+                clog << "See3CAM_24CUG::sendHidCmd: Read error: "
+                     << strerror(errno)
+                     << endl;
+                
+                return false;
+            }
+        }
+        else if ( read_result == 0 )
+        {
+            clog << "See3CAM_24CUG::sendHidCmd: HID device disconnected "
+                    "during read."
                  << endl;
             
             return false;
         }
         
-        if ( available_bytes > 0 ) {
-            ssize_t result = read( *fd_ptr
-                                 , inBuf + read_bytes
-                                 , min( (ssize_t)available_bytes
-                                      , len - read_bytes
-                                      )
-                                 );
-            
-            if ( result < 0 ) {
-                if ( errno == EINTR || errno == EAGAIN ) {
-                    this_thread::sleep_for(chrono::milliseconds(1));
-                    continue;
-                } else if ( errno == EIO ) {
-                    // Optionally implement a retry mechanism here
-                    clog << "See3CAM_24CUG::sendHidCmd: Read I/O error: "
-                         << strerror(errno)
-                         << endl;
-                    
-                    return false;
-                } else {
-                    clog << "See3CAM_24CUG::sendHidCmd: Read error: "
-                         << strerror(errno)
-                         << endl;
-                    
-                    return false;
-                }
-            } else if ( result == 0 ) {
-                clog << "See3CAM_24CUG::sendHidCmd: HID device disconnected "
-                        "during read."
-                     << endl;
-                
-                return false;
-            }
-            
-            read_bytes += result;
-        } else {
-            // No more data available
-            break;
-        }
+        break;
     }
     
-    return read_bytes > 0;
+    return true;
 }
+
 
 
 /* ************************** */
