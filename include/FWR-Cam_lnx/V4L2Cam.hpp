@@ -44,6 +44,14 @@ struct V4L2CamData
     static constexpr uint8_t MAX_BUFFERS = 8;
     static constexpr uint8_t MAX_PLANES  = 4;
     
+    // the `EXPECT_*`s mean, treat them as failures still, but not as errors
+    enum class XIOCTL_FLAGS : uint8_t { NONE           = 0
+                                      , QUASI_BLOCKING = 1 << 0
+                                      , EXPECT_EINVAL  = 1 << 1
+                                      , EXPECT_EDOM    = 1 << 2
+                                      , EXPECT_ENOTTY  = 1 << 3
+                                      };
+    
     
     enum class SettingSource : uint8_t { UNKNOWN, GIVEN, FETCHED };
     enum class State         : uint8_t { UNINITIALIZED
@@ -58,7 +66,7 @@ struct V4L2CamData
                                        , USERPTR
                                        , DMABUF
                                        };
-    enum class APIToUse     : uint8_t { UNKNOWN, MULTI, SINGLE  };
+    enum class APIToUse      : uint8_t { UNKNOWN, MULTI, SINGLE  };
     
     enum class ErrorAction { None
                            , StopStreaming
@@ -360,10 +368,10 @@ protected:
                                    ) noexcept;
     
 
-    bool xioctl( FD_t const& fd
-               , uint64_t    request
-               , void*       arg
-               , bool        quasi_blocking = false
+    bool xioctl( FD_t const&  fd
+               , uint64_t     request
+               , void*        arg
+               , XIOCTL_FLAGS callFlags = XIOCTL_FLAGS::NONE
                );
     static int32_t xopen( char    const* pathname
                         , int32_t const  flags
@@ -381,7 +389,7 @@ private:
     void initializeSettings();
     void    reapplySettings();
     
-    void resetCrop(FD_t const&);
+    // void resetCrop(FD_t const&);
     bool isSetMemoryTypeSupported() noexcept;
     bool determineMaxBufferSizeNeeded(FD_t const&);
     void determineSettingDomains(FD_t const& fd);

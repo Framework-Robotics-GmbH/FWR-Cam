@@ -37,8 +37,25 @@
 #include <libudev.h>    // For udev functions and structures
 
 #include <magic_enum/magic_enum.hpp>
+#include <magic_enum/magic_enum_flags.hpp>
 
 
+
+
+
+namespace magic_enum::customize
+{
+
+
+template <>
+struct enum_range<FWR::Cam_lnx::V4L2CamData::XIOCTL_FLAGS>
+{
+    static constexpr int min = 0;
+    static constexpr int max = 4;
+};
+
+
+} // namespace magic_enum::customize
 
 
 
@@ -48,6 +65,7 @@ namespace FWR::Cam_lnx
 
 using namespace std;
 using namespace magic_enum;
+using namespace magic_enum::bitwise_operators;
 
 
 // struct buffer
@@ -269,9 +287,11 @@ bool V4L2Cam::locateDeviceNodeAndInitialize()
         
         if ( !fd )
         {
+            int const errNo = errno;
+            
             clog << "V4L2Cam::locateDeviceNodeAndInitialize: Could not open "
                     "v4l2 device path! "
-                 << strerror(errno) << endl;
+                 << strerror(errNo) << endl;
             
             continue;
         }
@@ -280,9 +300,11 @@ bool V4L2Cam::locateDeviceNodeAndInitialize()
         
         if ( !xioctl(fd, VIDIOC_QUERYCAP, &cap) )
         {
+            int const errNo = errno;
+            
             clog << "V4L2Cam::locateDeviceNodeAndInitialize: VIDIOC_QUERYCAP "
                     "failed! "
-                 << strerror(errno) << endl;
+                 << strerror(errNo) << endl;
             
             continue;
         }
@@ -317,7 +339,7 @@ bool V4L2Cam::locateDeviceNodeAndInitialize()
             if ( devnum ) USBDeviceAddress = devnum;
             else          USBDeviceAddress.clear();
             
-            resetCrop(fd);
+            // resetCrop(fd);
             
             v4l2FD = make_shared<FD_t>(move(fd));
             
@@ -477,9 +499,11 @@ bool V4L2Cam::requestBufferQueue(uint32_t count) noexcept
     
     if ( !xioctl(*fd_ptr, VIDIOC_REQBUFS, &req) ) [[unlikely]]
     {
+        int const errNo = errno;
+        
         clog << "V4L2Cam::requestBufferQueue: Could not have the device prepare "
                 "a buffer queue for " << count << " buffers! "
-             << strerror(errno) << endl;
+             << strerror(errNo) << endl;
         
         return false;
     }
@@ -612,8 +636,10 @@ bool V4L2Cam::queueBuffer(v4l2_buffer& buf) noexcept
     
     if ( !xioctl(*fd_ptr, VIDIOC_QBUF, &buf) ) [[unlikely]]
     {
+        int const errNo = errno;
+        
         clog << "V4L2Cam::queueBuffer: could not queue buffer! "
-             << strerror(errno) << endl;
+             << strerror(errNo) << endl;
         
         return false;
     }
@@ -657,7 +683,7 @@ bool V4L2Cam::startStreaming() noexcept
          || !bufType
        ) [[unlikely]]
     {
-        clog << "V4L2Cam::requestBufferQueue: could not decide v4l2 buffer type!"
+        clog << "V4L2Cam::startStreaming: could not decide v4l2 buffer type!"
              << endl;
         
         return false;
@@ -666,8 +692,10 @@ bool V4L2Cam::startStreaming() noexcept
     
     if ( !xioctl(*fd_ptr, VIDIOC_STREAMON, &bufType) )
     {
+        int const errNo = errno;
+        
         clog << "V4L2Cam::startCapturing: couldn't start streaming! "
-             << strerror(errno) << endl;
+             << strerror(errNo) << endl;
         
         return false;
     }
@@ -697,6 +725,7 @@ bool V4L2Cam::fillBuffer(v4l2_buffer& buf) noexcept
     
     state = State::DEQUEUEING;
     
+    int errNo{};
     
     pollfd fds[2]{};
     fds[0].fd     = *fd_ptr;
@@ -712,14 +741,15 @@ bool V4L2Cam::fillBuffer(v4l2_buffer& buf) noexcept
     while ( true )
     {
         int ret = poll(fds, evntFD ? 2 : 1, -1);
+        errNo   = errno;
         
         if ( ret == -1 ) [[unlikely]]
         {
-            if ( errno == EINTR ) [[  likely]]
+            if ( errNo == EINTR ) [[  likely]]
                 continue;
             
             clog << "V4L2Cam::fillBuffer: poll errored out! "
-                 << strerror(errno) << endl;
+                 << strerror(errNo) << endl;
             
             state = State::STREAMING;
             
@@ -757,13 +787,14 @@ bool V4L2Cam::fillBuffer(v4l2_buffer& buf) noexcept
              << endl;
     
     bool succ = xioctl(*fd_ptr, VIDIOC_DQBUF, &buf);
+    errNo     = errno;
     
     state = State::STREAMING;
     
     if ( !succ ) [[unlikely]]
     {
         clog << "V4L2Cam::fillBuffer: dequeueing a buffer with a framedidn't work! "
-             << strerror(errno) << endl;
+             << strerror(errNo) << endl;
         
         return false;
     }
@@ -811,9 +842,10 @@ bool V4L2Cam::wake() noexcept
     
     if ( bytesWritten != sizeof(one) ) [[unlikely]]
     {
-        int err = errno;
+        int const errNo = errno;
+        
         clog << "V4L2Cam::wake: write to eventfd failed with errno "
-             << err << " (" << strerror(err) << ")"
+             << errNo << " (" << strerror(errNo) << ")"
              << endl;
         
         return false;
@@ -854,8 +886,10 @@ bool V4L2Cam::stopStreaming() noexcept
     
     if ( !xioctl(*fd_ptr, VIDIOC_STREAMOFF, &buf.type) ) [[unlikely]]
     {
+        int const errNo = errno;
+        
         clog << "V4L2Cam::stopStreaming: operation failed! "
-             << strerror(errno) << endl;
+             << strerror(errNo) << endl;
         
         return false;
     }
@@ -926,14 +960,12 @@ bool V4L2Cam::releaseBufferQueue() noexcept
     req.type   = bufType;
     req.memory = memType;
     
-    if ( !xioctl( *fd_ptr
-                , VIDIOC_REQBUFS
-                , &req
-                )
-       ) [[unlikely]]
+    if ( !xioctl(*fd_ptr, VIDIOC_REQBUFS, &req) ) [[unlikely]]
     {
+        int const errNo = errno;
+        
         clog << "V4L2Cam::releaseBufferQueue: Could not un-prep buffer queue! "
-             << strerror(errno) << endl;
+             << strerror(errNo) << endl;
         
         return false;
     }
@@ -1361,35 +1393,40 @@ bool V4L2Cam::gatherSerialNumbers( string_view      vendorID
 }
 
 
-bool V4L2Cam::xioctl( FD_t const& fd
-                    , uint64_t    request
-                    , void*       arg
-                    , bool        quasi_blocking
+bool V4L2Cam::xioctl( FD_t const&  fd
+                    , uint64_t     request
+                    , void*        arg
+                    , XIOCTL_FLAGS callFlags
                     )
 {
     using namespace std::chrono;
     using namespace std::chrono_literals;
+    
+    bool quasi_blocking =    ( callFlags & XIOCTL_FLAGS::QUASI_BLOCKING )
+                          != XIOCTL_FLAGS::NONE;
     
     constexpr uint8_t retry_count = 8;
     uint8_t           busy_count{};
     auto const        deadline    = steady_clock::now() + 1s;
     
     int r;
+    int errNo;
     
     do {
         errno = 0;
         
-        r = ioctl( static_cast<int>(fd)
-                 , static_cast<unsigned long>(request)
-                 , arg
-                 );
+        r     = ioctl( static_cast<int>(fd)
+                     , static_cast<unsigned long>(request)
+                     , arg
+                     );
+        errNo = errno;
         
         if ( r == -1 )
         {
             if ( steady_clock::now() >= deadline ) [[unlikely]]
                 break;
             
-            if ( errno == EBUSY )
+            if ( errNo == EBUSY )
             {
                 if      ( busy_count == 0 )
                     this_thread::yield();
@@ -1403,26 +1440,26 @@ bool V4L2Cam::xioctl( FD_t const& fd
                 
                 busy_count++;
             }
-            else if ( errno == EAGAIN && quasi_blocking )
+            else if ( errNo == EAGAIN && quasi_blocking )
                 this_thread::sleep_for(1ms);
         }
-    } while ( r == -1 && (      errno == EINTR
-                           ||   errno == EBUSY
-                           || ( errno == EAGAIN && quasi_blocking )
+    } while ( r == -1 && (      errNo == EINTR
+                           ||   errNo == EBUSY
+                           || ( errNo == EAGAIN && quasi_blocking )
                          )
             );
     
     if ( r == -1 ) [[unlikely]]
     {
         // Handle specific errors and set action flags
-        switch ( errno )
+        switch ( errNo )
         {
             // Errors indicating that uninitializing the camera abstraction class is appropriate
             case ENODEV:    [[fallthrough]]; // No such device
             case ENXIO:     [[fallthrough]]; // No such device or address
             case EBADF:                     // Bad file descriptor
                 clog << "V4L2Cam::xioctl: Error: Device is no longer available ("
-                     << strerror(errno)
+                     << strerror(errNo)
                      << "). Uninitializing camera class is indicated."
                      << endl;
                 
@@ -1440,7 +1477,7 @@ bool V4L2Cam::xioctl( FD_t const& fd
                     [[fallthrough]];
             case ETIMEDOUT:                  // Connection timed out
                 clog << "V4L2Cam::xioctl: Error: Device is busy or timed out ("
-                     << strerror(errno)
+                     << strerror(errNo)
                      << "). Resetting camera class is indicated."
                      << endl;
                 
@@ -1451,7 +1488,7 @@ bool V4L2Cam::xioctl( FD_t const& fd
             case EIO:       [[fallthrough]]; // Input/output error
             case EFAULT:                     // Bad address
                 clog << "V4L2Cam::xioctl: Error: Hardware failure ("
-                     << strerror(errno)
+                     << strerror(errNo)
                      << "). Power-cycling the USB camera is indicated."
                      << endl;
                 
@@ -1462,7 +1499,7 @@ bool V4L2Cam::xioctl( FD_t const& fd
             case EPERM:     [[fallthrough]]; // Operation not permitted
             case EACCES:                     // Permission denied
                 clog << "V4L2Cam::xioctl: Error: Permission denied ("
-                     << strerror(errno)
+                     << strerror(errNo)
                      << "). Check permissions is indicated."
                      << endl;
                 
@@ -1470,11 +1507,27 @@ bool V4L2Cam::xioctl( FD_t const& fd
                 break;
             
             // Errors indicating programming errors or misconfigurations
-            case EINVAL:    [[fallthrough]]; // Invalid argument
-            case ENOTTY:    [[fallthrough]]; // Inappropriate ioctl for device
+            case EINVAL:    if (    ( callFlags & XIOCTL_FLAGS::EXPECT_EINVAL )
+                                 != XIOCTL_FLAGS::NONE
+                               )
+                                return false;
+                            else
+                                [[fallthrough]]; // Invalid argument
+            case EDOM  :    if (    ( callFlags & XIOCTL_FLAGS::EXPECT_EDOM)
+                                 != XIOCTL_FLAGS::NONE
+                               )
+                                return false;
+                            else
+                                [[fallthrough]]; // Argument out of domain
+            case ENOTTY:    if (    ( callFlags & XIOCTL_FLAGS::EXPECT_ENOTTY)
+                                 != XIOCTL_FLAGS::NONE
+                               )
+                                return false;
+                            else
+                                [[fallthrough]]; // Inappropriate ioctl for device
             case EOVERFLOW:                  // Value too large for defined data type
                 clog << "V4L2Cam::xioctl: Error: Invalid request or argument ("
-                     << strerror(errno)
+                     << strerror(errNo)
                      << "). Check configuration is indicated."
                      << endl;
                 
@@ -1483,7 +1536,7 @@ bool V4L2Cam::xioctl( FD_t const& fd
             
             case ENOMEM:                     // Out of memory
                 clog << "V4L2Cam::xioctl: Error: Out of memory ("
-                     << strerror(errno) << ")."
+                     << strerror(errNo) << ")."
                      << endl;
                 
                 errorAction = ErrorAction::FreeMemory;
@@ -1495,8 +1548,8 @@ bool V4L2Cam::xioctl( FD_t const& fd
                 break;
             
             default:
-                clog << "V4L2Cam::xioctl: Error: ioctl failed with errno "
-                     << errno << " (" << strerror(errno) << ")."
+                clog << "V4L2Cam::xioctl: Error: ioctl failed with errNo "
+                     << to_string(errNo) << " (" << strerror(errNo) << ")."
                      << endl;
                 
                 break;
@@ -1504,11 +1557,11 @@ bool V4L2Cam::xioctl( FD_t const& fd
     }
     
     if ( r == -1 )
-    {
-        clog << "V4L2Cam::xioctl: error occured. given request: " << to_string(request)
+        clog << "V4L2Cam::xioctl: error occured. given request: "
+             << to_string(request)
              << endl;
-    }
     
+    errno = errNo;
     return r != -1;
 }
 
@@ -1519,36 +1572,48 @@ int32_t V4L2Cam::xopen( char    const* pathname
     constexpr int32_t retry_count = 10;
     int32_t delay_ms = 1;
     
-    int32_t fd{-1};
+    int32_t   fd{-1};
+    int errNo;
     
-    for ( int32_t attempt = 0; attempt < retry_count; ++attempt ) {
+    for ( int32_t attempt = 0; attempt < retry_count; ++attempt )
+    {
         errno = 0;
         
-        fd = open(pathname, flags);
+        fd    = open(pathname, flags);
+        errNo = errno;
         
         if ( fd >= 0 )
             break;
         
-        if ( errno == EINTR || errno == EAGAIN || errno == EBUSY ) {
-            if ( attempt < retry_count - 1 ) {
+        if ( errNo == EINTR || errNo == EAGAIN || errNo == EBUSY )
+        {
+            if ( attempt < retry_count - 1 )
+            {
                 this_thread::sleep_for(chrono::milliseconds(delay_ms *= 2));
+                
                 continue;
-            } else {
+            }
+            else
+            {
                 clog << "V4L2Cam::xopen: Failed to open character device after "
-                     << (attempt + 1) << " attempts: " << strerror(errno)
+                     << (attempt + 1) << " attempts: " << strerror(errNo)
                      << endl;
                 
                 break;
             }
-        } else if ( errno == ENOENT || errno == ENODEV ) {
+        }
+        else if ( errNo == ENOENT || errNo == ENODEV )
+        {
             clog << "V4L2Cam::xopen: character device not found: "
-                 << strerror(errno)
+                 << strerror(errNo)
                  << endl;
             
             break;
-        } else {
+        }
+        else
+        {
             clog << "V4L2Cam::xopen: Failed to open character device: "
-                 << strerror(errno)
+                 << strerror(errNo)
                  << endl;
             
             break;
@@ -1589,22 +1654,28 @@ void V4L2Cam::reapplySettings()
     applyExposure();
 }
 
-// only to be used by locateDeviceNodeAndInitialize()
-void V4L2Cam::resetCrop(FD_t const& fd)
-{
-    // if the cam can crop, reset crop
-    v4l2_cropcap cropcap{};
-    
-    cropcap.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    
-    if ( xioctl(fd, VIDIOC_CROPCAP, &cropcap)  )
-    {
-        v4l2_crop crop{};
-        crop.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-        crop.c = cropcap.defrect; /* reset to default */
-        xioctl(fd, VIDIOC_S_CROP, &crop);
-    }
-}
+// // only to be used by locateDeviceNodeAndInitialize()
+// void V4L2Cam::resetCrop(FD_t const& fd)
+// {
+//     // if the cam can crop, reset crop
+//     v4l2_cropcap cropcap{};
+//     
+//     cropcap.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+//     
+//     if ( xioctl(fd, VIDIOC_CROPCAP, &cropcap)  )
+//     {
+//         v4l2_crop crop{};
+//         crop.type = V4L2_BUF_TYPE_VIDEO_CAPTURE; // should first try *_MPLANE
+//         crop.c = cropcap.defrect; /* reset to default */
+//         
+//         if ( !xioctl(fd, VIDIOC_S_CROP, &crop) ) [[unlikely]]
+//             clog << "V4L2Cam::resetCrop: VIDIOC_S_CROP failed!"
+//                  << endl;
+//     }
+//     else [[unlikely]]
+//         clog << "V4L2Cam::resetCrop: VIDIOC_CROPCAP failed!"
+//              << endl;
+// }
 
 bool V4L2Cam::isSetMemoryTypeSupported() noexcept
 {
@@ -1657,9 +1728,11 @@ bool V4L2Cam::isSetMemoryTypeSupported() noexcept
     
     if ( !xioctl(*fd_ptr, VIDIOC_REQBUFS, &req) ) [[unlikely]]
     {
+        int const errNo = errno;
+        
         clog << "V4L2Cam::isSetMemoryTypeSupported: device does not support set "
                 "buffer type (v4l2_memory)! "
-             << strerror(errno) << endl;
+             << strerror(errNo) << endl;
         
         return false;
     }
@@ -1668,7 +1741,8 @@ bool V4L2Cam::isSetMemoryTypeSupported() noexcept
 }
 
 
-bool V4L2Cam::determineMaxBufferSizeNeeded(FD_t const& fd) {
+bool V4L2Cam::determineMaxBufferSizeNeeded(FD_t const& fd)
+{
     // TODO also learn supported resolutions and supported pixel formats
     maxBufferSizeNeeded.reset();
     
@@ -1681,7 +1755,8 @@ bool V4L2Cam::determineMaxBufferSizeNeeded(FD_t const& fd) {
          || !bufType
        ) [[unlikely]]
     {
-        clog << "V4L2Cam::requestBufferQueue: could not decide v4l2 buffer type!"
+        clog << "V4L2Cam::determineMaxBufferSizeNeeded: could not decide v4l2 "
+                "buffer type!"
              << endl;
         
         return false;
@@ -1693,24 +1768,41 @@ bool V4L2Cam::determineMaxBufferSizeNeeded(FD_t const& fd) {
     
     originalFmt.type = bufType;
     
-    if ( !xioctl(fd, VIDIOC_G_FMT, &originalFmt) )
+    if ( !xioctl(fd, VIDIOC_G_FMT, &originalFmt) ) [[unlikely]]
+    {
+        clog << "V4L2Cam::determineMaxBufferSizeNeeded: VIDIOC_G_FMT failed!"
+             << endl;
+        
         return false;
+    }
     
-    if ( !xioctl(fd, VIDIOC_TRY_FMT, &originalFmt) ) {
+    if ( !xioctl( fd
+                , VIDIOC_TRY_FMT
+                , &originalFmt
+                , XIOCTL_FLAGS::EXPECT_ENOTTY | XIOCTL_FLAGS::EXPECT_EINVAL
+                )
+       )
+    {
         if ( errno == ENOTTY || errno == EINVAL )
             SUPPORTS__VIDIOC_TRY_FMT = false;
         else
+        {
+            clog << "V4L2Cam::determineMaxBufferSizeNeeded: VIDIOC_TRY_FMT failed!"
+                 << endl;
+            
             return false;
+        }
     }
     
     // Structure to enumerate pixel formats
     v4l2_fmtdesc fmtDesc{};
+    fmtDesc.type = bufType;
     
-    // TODO after this, do it again with the *_MPLANE type
-    fmtDesc.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    int errNo{};
     
     // Enumerate all supported pixel formats
-    while ( xioctl(fd, VIDIOC_ENUM_FMT, &fmtDesc) ) {
+    while ( xioctl(fd, VIDIOC_ENUM_FMT, &fmtDesc, XIOCTL_FLAGS::EXPECT_EINVAL) )
+    {
         uint32_t pixelFormat = fmtDesc.pixelformat;
         
         // Structure to enumerate frame sizes
@@ -1719,65 +1811,102 @@ bool V4L2Cam::determineMaxBufferSizeNeeded(FD_t const& fd) {
         frmSize.pixel_format = pixelFormat;
         
         // Enumerate all frame sizes for the pixel format
-        while ( xioctl(fd, VIDIOC_ENUM_FRAMESIZES, &frmSize) ) {
-            v4l2_format fmt{};
+        while ( xioctl(fd, VIDIOC_ENUM_FRAMESIZES, &frmSize, XIOCTL_FLAGS::EXPECT_EINVAL) )
+        {
+            uint32_t width {};
+            uint32_t height{};
             
-            fmt.type                = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-            fmt.fmt.pix.pixelformat = pixelFormat;
-            fmt.fmt.pix.field       = V4L2_FIELD_ANY;
-            
-            switch ( frmSize.type ) {
+            switch ( frmSize.type )
+            {
                 case V4L2_FRMSIZE_TYPE_DISCRETE:
-                    fmt.fmt.pix.width  = frmSize.discrete.width;
-                    fmt.fmt.pix.height = frmSize.discrete.height;
+                    width  = frmSize.discrete.width;
+                    height = frmSize.discrete.height;
                     break;
                 case V4L2_FRMSIZE_TYPE_STEPWISE:   [[fallthrough]];
                 case V4L2_FRMSIZE_TYPE_CONTINUOUS:
-                    fmt.fmt.pix.width  = frmSize.stepwise.max_width;
-                    fmt.fmt.pix.height = frmSize.stepwise.max_height;
+                    width  = frmSize.stepwise.max_width;
+                    height = frmSize.stepwise.max_height;
                     break;
                 default:
                     clog << "V4L2Cam::determineMaxBufferSizeNeeded: Unknown "
                             "frame size type."
                          << endl;
                     
-                    frmSize.index++;
+                    ++frmSize.index;
                     continue;
             }
             
+            v4l2_format fmt{};
+            fmt.type = bufType;
+            
+            if ( bufType == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE )
+            {
+                fmt.fmt.pix_mp.pixelformat = pixelFormat;
+                fmt.fmt.pix_mp.field       = V4L2_FIELD_ANY;
+
+                fmt.fmt.pix_mp.width       = width;
+                fmt.fmt.pix_mp.height      = height;
+            }
+            else
+            {
+                fmt.fmt.pix.pixelformat = pixelFormat;
+                fmt.fmt.pix.field       = V4L2_FIELD_ANY;
+
+                fmt.fmt.pix.width       = width;
+                fmt.fmt.pix.height      = height;
+            }
+            
             // get sizeimage
-            bool ret = SUPPORTS__VIDIOC_TRY_FMT
-                     ? xioctl(fd, VIDIOC_TRY_FMT, &fmt)
-                     : xioctl(fd, VIDIOC_S_FMT  , &fmt);
+            bool ret = xioctl( fd
+                             ,   SUPPORTS__VIDIOC_TRY_FMT
+                               ? VIDIOC_TRY_FMT
+                               : VIDIOC_S_FMT
+                             , &fmt
+                             );
+            errNo = errno;
             
             if ( ret && fmt.fmt.pix.sizeimage > maxSizeImage )
                 maxSizeImage = fmt.fmt.pix.sizeimage;
+            else if ( !ret )
+                clog << "V4L2Cam::determineMaxBufferSizeNeeded: "
+                     << (   SUPPORTS__VIDIOC_TRY_FMT
+                          ? "VIDIOC_TRY_FMT"
+                          : "VIDIOC_S_FMT"
+                        )
+                     << " failed ("
+                     << strerror(errNo)
+                     << ")."
+                     << endl;
             
-            frmSize.index++;
+            ++frmSize.index;
         }
+        errNo = errno;
         
-        if ( errno != EINVAL && errno != 0 ) {
+        if ( errNo != EINVAL && errNo != 0 )
+        {
             clog << "V4L2Cam::determineMaxBufferSizeNeeded: v4l2 device frame "
-                    "sizes enumeration errored out"
+                    "sizes enumeration errored out (" << strerror(errNo) << ")."
                  << endl;
             
             return false;
         }
         
-        fmtDesc.index++;
+        ++fmtDesc.index;
     }
+    errNo = errno;
     
-    if ( errno != EINVAL && errno != 0 ) {
+    if ( errNo != EINVAL && errNo != 0 )
+    {
         clog << "V4L2Cam::determineMaxBufferSizeNeeded: v4l2 device format "
-                "enumeration errored out"
+                "enumeration errored out (" << strerror(errNo) << ")."
              << endl;
         
         return false;
     }
     
     if (    !SUPPORTS__VIDIOC_TRY_FMT
-         &&  xioctl(fd, VIDIOC_S_FMT, &originalFmt) != 0
-       )
+         && !xioctl(fd, VIDIOC_S_FMT, &originalFmt)
+       ) [[unlikely]]
     {
         apiToUse = APIToUse::UNKNOWN;
         
@@ -1796,7 +1925,8 @@ bool V4L2Cam::determineMaxBufferSizeNeeded(FD_t const& fd) {
     return maxBufferSizeNeeded.has_value();
 }
 
-void V4L2Cam::determineSettingDomains(FD_t const& fd) {
+void V4L2Cam::determineSettingDomains(FD_t const& fd)
+{
     queryControlDomain(fd, V4L2_CID_BRIGHTNESS, BRIGHTNESS_DOMAIN_KNOWN,
                        BRIGHTNESS_MIN, BRIGHTNESS_MAX, BRIGHTNESS_STEP);
     queryControlDomain(fd, V4L2_CID_CONTRAST, CONTRAST_DOMAIN_KNOWN,
@@ -1811,7 +1941,9 @@ void V4L2Cam::determineSettingDomains(FD_t const& fd) {
                        WHITE_BALANCE_MIN, WHITE_BALANCE_MAX, WHITE_BALANCE_STEP);
     queryControlDomain(fd, V4L2_CID_GAIN, GAIN_DOMAIN_KNOWN,
                        GAIN_MIN, GAIN_MAX, GAIN_STEP);
-    queryControlDomain(fd, V4L2_CID_EXPOSURE, EXPOSURE_DOMAIN_KNOWN,
+    // queryControlDomain(fd, V4L2_CID_EXPOSURE, EXPOSURE_DOMAIN_KNOWN,
+    //                    EXPOSURE_MIN, EXPOSURE_MAX, EXPOSURE_STEP);
+    queryControlDomain(fd, V4L2_CID_EXPOSURE_ABSOLUTE, EXPOSURE_DOMAIN_KNOWN,
                        EXPOSURE_MIN, EXPOSURE_MAX, EXPOSURE_STEP);
 }
 
@@ -1823,20 +1955,57 @@ void V4L2Cam::queryControlDomain( FD_t     const& fd
                                 , int32_t       & step
                                 )
 {
-    struct v4l2_queryctrl queryctrl {};
+    v4l2_queryctrl queryctrl{};
     queryctrl.id = controlID;
     
-    if ( xioctl(fd, VIDIOC_QUERYCTRL, &queryctrl) ) {
-        if (!(queryctrl.flags & V4L2_CTRL_FLAG_DISABLED)) {
-            domainKnown = true;
-            min = queryctrl.minimum;
-            max = queryctrl.maximum;
-            step = queryctrl.step;
-        }
-    } else if (errno != EINVAL)
-        clog << "V4L2Cam::queryControlDomain: Error querying control "
-             << controlID << ": " << strerror(errno)
+    // Call ioctl directly so we can treat EINVAL/EDOM as "unsupported" quietly.
+    if ( !xioctl( fd
+                , VIDIOC_QUERYCTRL
+                , &queryctrl
+                , XIOCTL_FLAGS::EXPECT_EINVAL | XIOCTL_FLAGS::EXPECT_EDOM
+                )
+       )
+    {
+        int const errNo = errno;
+        
+        // Unsupported / not applicable / driver oddities: silently skip.
+        if ( errNo == EINVAL || errNo == EDOM )
+            return;
+        
+        // Otherwise, real error worth logging (I/O, bad fd, etc.).
+        clog << "V4L2Cam::queryControlDomain: VIDIOC_QUERYCTRL failed for 0x"
+             << std::hex << controlID << std::dec << ": " << strerror(errNo)
              << endl;
+        
+        errno = errNo;
+        return;
+    }
+    
+    if ( queryctrl.flags & V4L2_CTRL_FLAG_DISABLED )
+        return;
+    
+    // Only publish a numeric domain for numeric controls.
+    switch ( queryctrl.type )
+    {
+        case V4L2_CTRL_TYPE_INTEGER:
+            domainKnown = true;
+            min  = queryctrl.minimum;
+            max  = queryctrl.maximum;
+            step = std::max<int32_t>( 1, queryctrl.step );
+            
+            return;
+        
+#ifdef V4L2_CTRL_TYPE_INTEGER64
+        case V4L2_CTRL_TYPE_INTEGER64:
+            // Optional: upgrade to QUERY_EXT_CTRL to get full 64-bit min/max/step.
+            // For now, don’t pretend we have a 32-bit domain.
+            return;
+#endif
+        
+        // MENU/BOOLEAN/BUTTON/STRING/etc. don’t have a numeric [min,max,step] domain.
+        default:
+            return;
+    }
 }
 
 
@@ -2274,8 +2443,17 @@ bool V4L2Cam::fetch_control_value( shared_ptr<FD_t> fd_ptr
     
     v4l2_control ctrl{id, {}};
     
-    if ( xioctl(*fd_ptr, VIDIOC_G_CTRL, &ctrl) != 0 )
+    if ( !xioctl(*fd_ptr, VIDIOC_G_CTRL, &ctrl) ) [[unlikely]]
+    {
+        int const errNo = errno;
+        
+        clog << "V4L2Cam::fetch_control_value: VIDIOC_G_CTRL with id \'"
+             << to_string(id) << "\" failed (" << strerror(errNo) << ")."
+             << endl;
+        
+        errno = errNo;
         return false;
+    }
     
     value = ctrl.value;
     
@@ -2292,7 +2470,20 @@ bool V4L2Cam::apply_control_value( shared_ptr<FD_t> fd_ptr
     
     v4l2_control ctrl{id, value};
     
-    return xioctl(*fd_ptr, VIDIOC_S_CTRL, &ctrl) == 0;
+    if ( !xioctl(*fd_ptr, VIDIOC_S_CTRL, &ctrl) ) [[unlikely]]
+    {
+        int const errNo = errno;
+        
+        clog << "V4L2Cam::apply_control_value: VIDIOC_S_CTRL with id \""
+             << to_string(id) << "\" and value \"" << to_string(value)
+             << "\" failed (" << strerror(errNo) << ")."
+             << endl;
+        
+        errno = errNo;
+        return false;
+    }
+    
+    return true;
 }
 
 //  public:
@@ -2304,28 +2495,36 @@ optional<v4l2_format> V4L2Cam::giveV4L2Format()
         return {};
     
     v4l2_format format{};
+    int errNo{};
     
     format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
-    if ( xioctl(*fd_ptr, VIDIOC_G_FMT, &format))
+    if ( xioctl(*fd_ptr, VIDIOC_G_FMT, &format, XIOCTL_FLAGS::EXPECT_EINVAL) )
     {
         apiToUse = APIToUse::MULTI;
         
         return format;
     }
+    errNo = errno;
+    
+    if ( errNo != EINVAL ) [[unlikely]]
+        clog << "V4L2Cam::giveV4L2Format: VIDIOC_G_FMT with "
+                "V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE failed! (" << strerror(errNo) << ")"
+             << endl;
     
     format = {};
     format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    if ( xioctl(*fd_ptr, VIDIOC_G_FMT, &format))
+    if ( xioctl(*fd_ptr, VIDIOC_G_FMT, &format) )
     {
         apiToUse = APIToUse::SINGLE;
         
         return format;
     }
+    errNo = errno;
     
     apiToUse = APIToUse::UNKNOWN;
     
     clog << "V4L2Cam::giveV4L2Format: requesting format failed! "
-         << strerror(errno) << endl;
+         << strerror(errNo) << endl;
     
     return {};
 }
@@ -2421,20 +2620,24 @@ bool V4L2Cam::fetchResolutionAndPixelFormat()
         return false;
     
     v4l2_format format{};
+    int errNo{};
     
     resolutionSource  = ssrc::FETCHED;
     pixelFormatSource = ssrc::FETCHED;
     
     format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
     
-    if ( xioctl(*fd_ptr, VIDIOC_G_FMT, &format) )
+    if ( xioctl(*fd_ptr, VIDIOC_G_FMT, &format, XIOCTL_FLAGS::EXPECT_EINVAL) )
     {
         apiToUse = APIToUse::MULTI;
         
-        if ( checkResolution(format.fmt.pix_mp.width, format.fmt.pix_mp.height) ) {
+        if ( checkResolution(format.fmt.pix_mp.width, format.fmt.pix_mp.height) )
+        {
             width  = static_cast<uint32_t>(format.fmt.pix_mp.width);
             height = static_cast<uint32_t>(format.fmt.pix_mp.height);
-        } else {
+        }
+        else
+        {
             width .reset();
             height.reset();
         }
@@ -2450,6 +2653,14 @@ bool V4L2Cam::fetchResolutionAndPixelFormat()
         
         return true;
     }
+    errNo = errno;
+    
+    if ( errNo != EINVAL ) [[unlikely]]
+        clog << "V4L2Cam::fetchResolutionAndPixelFormat: VIDIOC_G_FMT with "
+                "V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE failed! ("
+             << strerror(errNo)
+             << ")"
+             << endl;
     
     format = {};
     format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -2475,18 +2686,23 @@ bool V4L2Cam::fetchResolutionAndPixelFormat()
         
         return true;
     }
-    else
-    {
-        apiToUse = APIToUse::UNKNOWN;
-        
-        width      .reset();
-        height     .reset();
-        pixelFormat.reset();
-        
-        currentBufferSizeNeeded.reset();
-        
-        return false;
-    }
+    errNo = errno;
+    
+    clog << "V4L2Cam::fetchResolutionAndPixelFormat: VIDIOC_G_FMT with "
+            "V4L2_BUF_TYPE_VIDEO_CAPTURE failed! ("
+         << strerror(errNo)
+         << ")"
+         << endl;
+
+    apiToUse = APIToUse::UNKNOWN;
+    
+    width      .reset();
+    height     .reset();
+    pixelFormat.reset();
+    
+    currentBufferSizeNeeded.reset();
+    
+    return false;
 }
 
 bool V4L2Cam::applyResolutionAndPixelFormat()
@@ -2503,7 +2719,7 @@ bool V4L2Cam::applyResolutionAndPixelFormat()
     
     format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
     
-    if ( xioctl(*fd_ptr, VIDIOC_G_FMT, &format) )
+    if ( xioctl(*fd_ptr, VIDIOC_G_FMT, &format, XIOCTL_FLAGS::EXPECT_EINVAL) )
     {
         apiToUse = APIToUse::MULTI;
         
@@ -2515,6 +2731,14 @@ bool V4L2Cam::applyResolutionAndPixelFormat()
     }
     else
     {
+        int errNo = errno;
+        
+        if ( errNo != EINVAL ) [[unlikely]]
+            clog << "V4L2Cam::applyResolutionAndPixelFormat: VIDIOC_G_FMT with "
+                    "V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE failed! ("
+                 << strerror(errNo) << ")"
+                 << endl;
+        
         format = {};
         
         format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -2531,6 +2755,13 @@ bool V4L2Cam::applyResolutionAndPixelFormat()
         }
         else
         {
+            errNo = errno;
+            
+            clog << "V4L2Cam::applyResolutionAndPixelFormat: VIDIOC_G_FMT with "
+                    "V4L2_BUF_TYPE_VIDEO_CAPTURE failed! ("
+                 << strerror(errNo) << ")"
+                 << endl;
+            
             apiToUse = APIToUse::UNKNOWN;
             
             return false;
@@ -2538,11 +2769,17 @@ bool V4L2Cam::applyResolutionAndPixelFormat()
     }
     
     
-    if ( xioctl(*fd_ptr, VIDIOC_S_FMT, &format) ) {
+    if ( xioctl(*fd_ptr, VIDIOC_S_FMT, &format) )
+    {
         currentBufferSizeNeeded = format.fmt.pix.sizeimage;
         
         return true;
-    } else {
+    }
+    else
+    {
+        clog << "V4L2Cam::applyResolutionAndPixelFormat: VIDIOC_S_FMT failed"
+             << endl;
+        
         currentBufferSizeNeeded.reset();
         
         return false;
@@ -2622,6 +2859,10 @@ bool V4L2Cam::fetchBrightness()
                                       , value
                                       );
     
+    if ( !fetched ) [[unlikely]]
+        clog << "V4L2Cam::fetchBrightness: V4L2_CID_BRIGHTNESS failed"
+             << endl;
+    
     brightness = fetched && checkBrightness(value)
                ? decltype(brightness)(value)
                : decltype(brightness)(nullopt);
@@ -2695,6 +2936,10 @@ bool V4L2Cam::fetchContrast()
                                       , V4L2_CID_CONTRAST
                                       , value
                                       );
+    
+    if ( !fetched ) [[unlikely]]
+        clog << "V4L2Cam::fetchContrast: V4L2_CID_CONTRAST failed"
+             << endl;
     
     contrast = fetched && checkContrast(value)
              ? decltype(contrast)(value)
@@ -2770,6 +3015,10 @@ bool V4L2Cam::fetchSaturation()
                                       , value
                                       );
     
+    if ( !fetched ) [[unlikely]]
+        clog << "V4L2Cam::fetchSaturation: V4L2_CID_SATURATION failed"
+             << endl;
+    
     saturation = fetched && checkSaturation(value)
                ? decltype(saturation)(value)
                : decltype(saturation)(nullopt);
@@ -2843,6 +3092,10 @@ bool V4L2Cam::fetchSharpness()
                                       , V4L2_CID_SHARPNESS
                                       , value
                                       );
+    
+    if ( !fetched ) [[unlikely]]
+        clog << "V4L2Cam::fetchSharpness: V4L2_CID_SHARPNESS failed"
+             << endl;
     
     sharpness = fetched && checkSharpness(value)
               ? decltype(sharpness)(value)
@@ -2918,6 +3171,10 @@ bool V4L2Cam::fetchGamma()
                                       , value
                                       );
     
+    if ( !fetched ) [[unlikely]]
+        clog << "V4L2Cam::fetchGamma: V4L2_CID_GAMMA failed"
+             << endl;
+    
     gamma = fetched && checkGamma(value)
           ? decltype(gamma)(value)
           : decltype(gamma)(nullopt);
@@ -2991,6 +3248,11 @@ bool V4L2Cam::fetchWhiteBalance()
                                       , V4L2_CID_WHITE_BALANCE_TEMPERATURE
                                       , value
                                       );
+    
+    if ( !fetched ) [[unlikely]]
+        clog << "V4L2Cam::fetchWhiteBalance: "
+                "V4L2_CID_WHITE_BALANCE_TEMPERATURE failed"
+             << endl;
     
     whiteBalance = fetched && checkWhiteBalance(value)
                  ? decltype(whiteBalance)(value)
@@ -3066,6 +3328,10 @@ bool V4L2Cam::fetchGain()
                                       , value
                                       );
     
+    if ( !fetched ) [[unlikely]]
+        clog << "V4L2Cam::fetchGain: V4L2_CID_GAIN failed"
+             << endl;
+    
     gain = fetched && checkGain(value)
          ? decltype(gain)(value)
          : decltype(gain)(nullopt);
@@ -3135,6 +3401,10 @@ bool V4L2Cam::fetchPowerLineFrequency()
         
         return true;
     } else {
+        clog << "V4L2Cam::fetchPowerLineFrequency: "
+                "V4L2_CID_POWER_LINE_FREQUENCY failed"
+             << endl;
+        
         powerLineFrequency.reset();
         
         return false;
@@ -3199,9 +3469,13 @@ bool V4L2Cam::fetchExposure()
     exposureSource = ssrc::FETCHED;
 
     bool fetched = fetch_control_value( produceV4L2FD()
-                                      , V4L2_CID_EXPOSURE
+                                      , V4L2_CID_EXPOSURE_ABSOLUTE
                                       , value
                                       );
+    
+    if ( !fetched ) [[unlikely]]
+        clog << "V4L2Cam::fetchExposure: V4L2_CID_EXPOSURE_ABSOLUTE failed"
+             << endl;
     
     exposure = fetched && checkExposure(value)
              ? decltype(exposure)(value)
@@ -3221,7 +3495,7 @@ bool V4L2Cam::applyExposure()
         value -= (value - EXPOSURE_MIN) % EXPOSURE_STEP;
     
     return apply_control_value( produceV4L2FD()
-                              , V4L2_CID_EXPOSURE
+                              , V4L2_CID_EXPOSURE_ABSOLUTE
                               , value
                               );
 }

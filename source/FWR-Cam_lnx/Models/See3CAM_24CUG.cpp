@@ -326,7 +326,10 @@ bool See3CAM_24CUG::sendHidCmd( uint8_t* outBuf
     auto fd_ptr = produceHIDFD();
     
     if ( !fd_ptr || !*fd_ptr ) [[unlikely]]
+    {
+        errno = 0;
         return false;
+    }
     
     ssize_t written_bytes = 0;
     
@@ -339,26 +342,30 @@ bool See3CAM_24CUG::sendHidCmd( uint8_t* outBuf
         
         if ( result < 0 )
         {
-            if ( errno == EINTR || errno == EAGAIN )
+            int const errNo = errno;
+            
+            if ( errNo == EINTR || errNo == EAGAIN )
             {
                 this_thread::sleep_for(milliseconds(1));
                 continue;
             }
-            else if ( errno == EIO )
+            else if ( errNo == EIO )
             {
                 // Optionally implement a retry mechanism here
                 clog << "See3CAM_24CUG::sendHidCmd: Write I/O error: "
-                     << strerror(errno)
+                     << strerror(errNo)
                      << endl;
                 
+                errno = errNo;
                 return false;
             }
             else
             {
                 clog << "See3CAM_24CUG::sendHidCmd: Write error: "
-                     << strerror(errno)
+                     << strerror(errNo)
                      << endl;
                 
+                errno = errNo;
                 return false;
             }
         }
@@ -378,6 +385,7 @@ bool See3CAM_24CUG::sendHidCmd( uint8_t* outBuf
                     "HID device."
                  << endl;
             
+            errno = 0;
             return false;
         }
         
@@ -399,7 +407,9 @@ bool See3CAM_24CUG::sendHidCmd( uint8_t* outBuf
         
         if ( select_result < 0 )
         {
-            if ( errno == EINTR )
+            int const errNo = errno;
+            
+            if ( errNo == EINTR )
             {
                 this_thread::sleep_for(milliseconds(1));
                 
@@ -407,9 +417,10 @@ bool See3CAM_24CUG::sendHidCmd( uint8_t* outBuf
             }
             
             clog << "See3CAM_24CUG::sendHidCmd: Select error: "
-                 << strerror(errno)
+                 << strerror(errNo)
                  << endl;
             
+            errno = errNo;
             return false;
         }
         else if ( select_result == 0 )
@@ -429,28 +440,32 @@ bool See3CAM_24CUG::sendHidCmd( uint8_t* outBuf
         
         if ( read_result < 0 )
         {
-            if ( errno == EINTR || errno == EAGAIN )
+            int const errNo = errno;
+            
+            if ( errNo == EINTR || errNo == EAGAIN )
             {
                 this_thread::sleep_for(milliseconds(1));
                 
                 continue;
             }
             
-            if ( errno == EIO )
+            if ( errNo == EIO )
             {
                 // Optionally implement a retry mechanism here
                 clog << "See3CAM_24CUG::sendHidCmd: Read I/O error: "
-                     << strerror(errno)
+                     << strerror(errNo)
                      << endl;
                 
+                errno = errNo;
                 return false;
             }
             else
             {
                 clog << "See3CAM_24CUG::sendHidCmd: Read error: "
-                     << strerror(errno)
+                     << strerror(errNo)
                      << endl;
                 
+                errno = errNo;
                 return false;
             }
         }
@@ -460,6 +475,7 @@ bool See3CAM_24CUG::sendHidCmd( uint8_t* outBuf
                     "during read."
                  << endl;
             
+            errno = 0;
             return false;
         }
         
