@@ -32,6 +32,7 @@
 #include <sys/mman.h>
 #include <sys/ioctl.h>
 #include <linux/videodev2.h>
+#include <linux/usbdevice_fs.h>
 // #include <stdbool.h>
 
 #include <libudev.h>    // For udev functions and structures
@@ -492,6 +493,25 @@ bool V4L2Cam::requestBufferQueue(uint32_t count) noexcept
     }
     
     
+    {
+        v4l2_requestbuffers req{};
+        req.count  = 0;
+        req.type   = bufType;
+        req.memory = memType;
+        
+        if ( !xioctl(*fd_ptr, VIDIOC_REQBUFS, &req) ) [[unlikely]]
+        {
+            int const errNo = errno;
+            
+            clog << "V4L2Cam::requestBufferQueue: Could not pre-cleanup buffer queue! "
+                 << strerror(errNo)
+                 << endl;
+            
+            return false;
+        }
+    }
+    
+    
     v4l2_requestbuffers req{};
     req.count  = count;
     req.type   = bufType;
@@ -546,7 +566,7 @@ bool V4L2Cam::produceUnqueuedMask(decltype(V4L2CamData::buffersQueued)& mask) co
 bool V4L2Cam::prepBuffer(v4l2_buffer& buf) noexcept
 {
     if (    state != State::BUFFER_QUEUE_PREPPED
-         && state != State::STREAMING
+         && state != State::DEQUEUEING
        ) [[unlikely]]
     {
         clog << "V4L2Cam::prepBuffer: not in a correct state "
@@ -729,7 +749,7 @@ bool V4L2Cam::fillBuffer(v4l2_buffer& buf) noexcept
     
     pollfd fds[2]{};
     fds[0].fd     = *fd_ptr;
-    fds[0].events = POLLIN;
+    fds[0].events = ( POLLIN /*| POLLERR | POLLPRI*/ );
     
     if ( evntFD ) [[  likely]]
     {
@@ -746,7 +766,12 @@ bool V4L2Cam::fillBuffer(v4l2_buffer& buf) noexcept
         if ( ret == -1 ) [[unlikely]]
         {
             if ( errNo == EINTR ) [[  likely]]
+            {
+                clog << "V4L2Cam::fillBuffer: poll got interupted"
+                     << endl;
+                
                 continue;
+            }
             
             clog << "V4L2Cam::fillBuffer: poll errored out! "
                  << strerror(errNo) << endl;
@@ -767,7 +792,25 @@ bool V4L2Cam::fillBuffer(v4l2_buffer& buf) noexcept
                  << endl;
         }
         
-        if ( !( fds[0].revents & POLLIN ) ) [[unlikely]]
+        /*if ( fds[0].revents & POLLPRI ) [[unlikely]]
+        {
+            clog << "V4L2Cam::fillBuffer: polled POLLPRI on v4l2 interface!"
+                 << endl;
+            
+            state = State::STREAMING;
+            
+            return false;
+        }
+        else if ( fds[0].revents & POLLERR ) [[unlikely]]
+        {
+            clog << "V4L2Cam::fillBuffer: polled POLLERR on v4l2 interface!"
+                 << endl;
+            
+            state = State::STREAMING;
+            
+            return false;
+        }
+        else*/ if ( !( fds[0].revents & POLLIN ) ) [[unlikely]]
         {
             state = State::STREAMING;
             
@@ -793,7 +836,7 @@ bool V4L2Cam::fillBuffer(v4l2_buffer& buf) noexcept
     
     if ( !succ ) [[unlikely]]
     {
-        clog << "V4L2Cam::fillBuffer: dequeueing a buffer with a framedidn't work! "
+        clog << "V4L2Cam::fillBuffer: dequeueing a buffer with a frame didn't work! "
              << strerror(errNo) << endl;
         
         return false;
@@ -872,6 +915,8 @@ bool V4L2Cam::stopStreaming() noexcept
     }
     
     
+    state = State::DEQUEUEING;
+    
     v4l2_buffer buf{};
     
     if ( !prepBuffer(buf) ) [[unlikely]]
@@ -887,6 +932,8 @@ bool V4L2Cam::stopStreaming() noexcept
     if ( !xioctl(*fd_ptr, VIDIOC_STREAMOFF, &buf.type) ) [[unlikely]]
     {
         int const errNo = errno;
+        
+        state = State::STREAMING;
         
         clog << "V4L2Cam::stopStreaming: operation failed! "
              << strerror(errNo) << endl;
@@ -2100,6 +2147,11 @@ void V4L2Cam::uninitialize()
     
     if ( !superObjectCannotExist ) [[  likely]]
         _uninitialize();
+    
+    // xioctl(*produceV4L2FD(), USBDEVFS_RESET, 0);
+    // errno = 0;
+    
+    // powerCycleDevice();
     
     closeV4L2FD();
     v4l2Path.clear();

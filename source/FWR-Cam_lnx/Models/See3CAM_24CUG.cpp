@@ -14,12 +14,12 @@
 
 // needs flags: -std=c++20 -ludev -pthread
 
-#include <iostream>        // For std::clog, std::cout
+#include <iostream>        // For clog, cout
 #include <string_view>
-#include <thread>          // For std::this_thread::sleep_for, std::this_thread::yield
-#include <chrono>          // For std::chrono::milliseconds, std::chrono::steady_clock
-#include <utility>         // For std::exchange
-#include <algorithm>       // For std::min
+#include <thread>          // For this_thread::sleep_for, this_thread::yield
+#include <chrono>          // For chrono::milliseconds, chrono::steady_clock
+#include <utility>         // For exchange
+#include <algorithm>       // For min
 #include <cstring>         // For C string functions like memset, strcmp, strerror
 #include <cstdio>          // For printf
 // #include <cstdlib>         // For atoi
@@ -107,7 +107,7 @@ static constexpr uint8_t GET_SUCCESS                     = 0x01;
 
 
 
-See3CAM_24CUG:: See3CAM_24CUG(std::string const& serialNo) noexcept
+See3CAM_24CUG:: See3CAM_24CUG(string const& serialNo) noexcept
  :  V4L2Cam(serialNo)
 {}
 
@@ -178,9 +178,18 @@ bool See3CAM_24CUG::_locateDeviceNodeAndInitialize( udev       * uDev
         hidPath = dev_path;
         
         hidFD = make_shared<FD_t>(move(fd));
-        initializeSettings();
+        
+        if ( !drainHidInput(BUFFER_LENGTH) ) [[unlikely]]
+            clog << "See3CAM_24CUG::_locateDeviceNodeAndInitialize: Could not "
+                    "ensure HIDraw device interface is ready to be used!"
+                 << endl;
+        else
+        {
+            initializeSettings();
+            initialized = true;
+        }
+        
         closeHIDFD();
-        initialized = true;
         
         udev_device_unref(dev);
         break;
@@ -321,7 +330,7 @@ bool See3CAM_24CUG::sendHidCmd( uint8_t* outBuf
                               , uint32_t    len
                               )
 {
-    using namespace std::chrono;
+    using namespace chrono;
     
     auto fd_ptr = produceHIDFD();
     
@@ -330,6 +339,14 @@ bool See3CAM_24CUG::sendHidCmd( uint8_t* outBuf
         errno = 0;
         return false;
     }
+    
+//     if ( !drainHidInput(len) ) [[unlikely]]
+//     {
+//         clog << "See3CAM_24CUG::sendHidCmd: couldn't pre-drain HID interface!"
+//              << endl;
+//         
+//         return false;
+//     }
     
     ssize_t written_bytes = 0;
     
@@ -373,66 +390,82 @@ bool See3CAM_24CUG::sendHidCmd( uint8_t* outBuf
         written_bytes += result;
     }
     
-    auto const end_time = steady_clock::now() + seconds(5);
+//     auto const end_time = steady_clock::now() + seconds(1);
+//     
+//     // Wait for data availability using select
+//     while ( true )
+//     {
+//         auto now = steady_clock::now();
+//         
+//         if ( now >= end_time ) {
+//             clog << "See3CAM_24CUG::sendHidCmd: Timeout waiting for data from "
+//                     "HID device."
+//                  << endl;
+//             
+//             errno = 0;
+//             return false;
+//         }
+//         
+//         timeval tv{};
+//         fd_set  rfds;
+//         FD_ZERO(&rfds);
+//         FD_SET(static_cast<int>(*fd_ptr), &rfds);
+//         
+//         auto const remaining_time = duration_cast<microseconds>(end_time - now);
+//         tv.tv_sec  = static_cast<     time_t>(remaining_time.count() / 1'000'000);
+//         tv.tv_usec = static_cast<suseconds_t>(remaining_time.count() % 1'000'000);
+//         
+//         clog << "See3CAM_24CUG::sendHidCmd: try to `select` ..."
+//              << endl;
+//         
+//         int32_t select_result = select( *fd_ptr + 1
+//                                       , &rfds
+//                                       , nullptr
+//                                       , nullptr
+//                                       , &tv
+//                                       );
+//         
+//         if ( select_result < 0 )
+//         {
+//             int const errNo = errno;
+//             
+//             if ( errNo == EINTR )
+//             {
+//                 this_thread::sleep_for(milliseconds(1));
+//                 
+//                 continue;
+//             }
+//             
+//             clog << "See3CAM_24CUG::sendHidCmd: Select error: "
+//                  << strerror(errNo)
+//                  << endl;
+//             
+//             errno = errNo;
+//             return false;
+//         }
+//         else if ( select_result == 0 )
+//             continue; // just run into timeout test at loop start
+//         
+//         // Data is available for reading
+//         break;
+//     }
     
-    // Wait for data availability using select
+    auto const end_time = steady_clock::now() + seconds(1);
+    
     while ( true )
     {
         auto now = steady_clock::now();
         
-        if ( now >= end_time ) {
-            clog << "See3CAM_24CUG::sendHidCmd: Timeout waiting for data from "
-                    "HID device."
+        if ( now >= end_time ) [[unlikely]]
+        {
+            clog << "See3CAM_24CUG::sendHidCmd: Timeout waiting for response from "
+                    "HID device!"
                  << endl;
             
             errno = 0;
             return false;
         }
         
-        timeval tv{};
-        fd_set  rfds;
-        FD_ZERO(&rfds);
-        FD_SET(static_cast<int>(*fd_ptr), &rfds);
-        
-        auto const remaining_time = duration_cast<microseconds>(end_time - now);
-        tv.tv_sec  = static_cast<     time_t>(remaining_time.count() / 1'000'000);
-        tv.tv_usec = static_cast<suseconds_t>(remaining_time.count() % 1'000'000);
-        
-        int32_t select_result = select( *fd_ptr + 1
-                                      , &rfds
-                                      , nullptr
-                                      , nullptr
-                                      , &tv
-                                      );
-        
-        if ( select_result < 0 )
-        {
-            int const errNo = errno;
-            
-            if ( errNo == EINTR )
-            {
-                this_thread::sleep_for(milliseconds(1));
-                
-                continue;
-            }
-            
-            clog << "See3CAM_24CUG::sendHidCmd: Select error: "
-                 << strerror(errNo)
-                 << endl;
-            
-            errno = errNo;
-            return false;
-        }
-        else if ( select_result == 0 )
-            continue; // just run into timeout test at loop start
-        
-        // Data is available for reading
-        break;
-    }
-    
-    
-    while ( true )
-    {
         ssize_t const read_result = read( *fd_ptr
                                         , inBuf
                                         , len
@@ -442,7 +475,7 @@ bool See3CAM_24CUG::sendHidCmd( uint8_t* outBuf
         {
             int const errNo = errno;
             
-            if ( errNo == EINTR || errNo == EAGAIN )
+            if ( errNo == EINTR || errNo == EAGAIN || EWOULDBLOCK )
             {
                 this_thread::sleep_for(milliseconds(1));
                 
@@ -484,6 +517,52 @@ bool See3CAM_24CUG::sendHidCmd( uint8_t* outBuf
     
     return true;
 }
+
+
+bool See3CAM_24CUG::drainHidInput(size_t reportLen)
+{
+    using namespace chrono;
+    
+    auto fd_ptr = produceHIDFD();
+    
+    if ( !fd_ptr || !*fd_ptr ) [[unlikely]]
+    {
+        errno = 0;
+        return true; // nothing to drain if we don't have a fd yet
+    }
+    
+    
+    vector<uint8_t> buf;
+    buf.resize(reportLen);
+    
+    while ( true )
+    {
+        ssize_t n = read(*fd_ptr, buf.data(), buf.size());
+        
+        if ( n > 0 )
+            // drained one report, loop again
+            continue;
+        
+        if ( n == 0 )
+            // device disappeared
+            return false;
+        
+        if ( errno == EAGAIN || errno == EWOULDBLOCK )
+            // nothing left to read → drained
+            break;
+        
+        if ( errno == EINTR )
+            continue;
+        
+        // hard error
+        return false;
+    }
+    
+    // Budget expired: we drained as much as we could. Treat as success.
+    errno = 0;
+    return true;
+}
+
 
 
 

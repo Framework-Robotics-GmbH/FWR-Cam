@@ -228,7 +228,8 @@ private:
     bool checkStreamMode();
     
     void initializeBuffers();
-    bool sendHidCmd(uint8_t* outBuf, uint8_t* inBuf, uint32_t len);
+    bool  sendHidCmd  (uint8_t* outBuf, uint8_t* inBuf, uint32_t len);
+    bool drainHidInput(size_t reportLen);
     
     
     static constexpr std::array<std::array<uint32_t, 2>, 3> RESOLUTIONS = {{
