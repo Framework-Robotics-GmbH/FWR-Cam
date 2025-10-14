@@ -248,6 +248,10 @@ bool V4L2Cam::locateDeviceNodeAndInitialize()
         if ( !path ) [[unlikely]]
             continue;
         
+        clog << "V4L2Cam::locateDeviceNodeAndInitialize: looking at path "
+             << path
+             << endl;
+        
         dev = udev_device_new_from_syspath(uDev, path);
         
         if ( !dev )
@@ -268,14 +272,25 @@ bool V4L2Cam::locateDeviceNodeAndInitialize()
         if (                !vendor ||              !product
              || vendorID !=  vendor || productID !=  product
            )
+        {
+            clog << "V4L2Cam::locateDeviceNodeAndInitialize: wrong vendor and/or "
+                    "product id"
+                 << endl;
+            
             continue;
+        }
         
         product_found = true;
         
         const char *sn = udev_device_get_sysattr_value(pdev, "serial");
         
         if ( !sn || serialNo != sn )
+        {
+            clog << "V4L2Cam::locateDeviceNodeAndInitialize: wrong serial No"
+                 << endl;
+        
             continue;
+        }
         
         serial_found = true;
         
@@ -283,6 +298,10 @@ bool V4L2Cam::locateDeviceNodeAndInitialize()
         
         if ( !dev_path )
             continue;
+        
+        clog << "V4L2Cam::locateDeviceNodeAndInitialize: looking at device path "
+             << dev_path
+             << endl;
         
         FD_t fd{xopen(dev_path, O_RDWR | O_NONBLOCK)};
         
@@ -313,14 +332,25 @@ bool V4L2Cam::locateDeviceNodeAndInitialize()
         if ( !(   cap.capabilities
                 & V4L2_CAP_VIDEO_CAPTURE )
            )
+        {
+            clog << "V4L2Cam::locateDeviceNodeAndInitialize: not a capture device"
+                 << endl;
+            
             continue;
+        }
         
         capture_found = true;
         
         if ( !(   cap.capabilities
                 & V4L2_CAP_STREAMING )
            )
+        {
+            clog << "V4L2Cam::locateDeviceNodeAndInitialize: not a streaming "
+                    "capture device"
+                 << endl;
+            
             continue;
+        }
         
         streaming_found = true;
         
@@ -566,11 +596,12 @@ bool V4L2Cam::produceUnqueuedMask(decltype(V4L2CamData::buffersQueued)& mask) co
 bool V4L2Cam::prepBuffer(v4l2_buffer& buf) noexcept
 {
     if (    state != State::BUFFER_QUEUE_PREPPED
+         && state != State::STREAMING
          && state != State::DEQUEUEING
        ) [[unlikely]]
     {
         clog << "V4L2Cam::prepBuffer: not in a correct state "
-                "(BUFFER_QUEUE_PREPPED|STREAMING) to prep a buffer descriptor!"
+                "(BUFFER_QUEUE_PREPPED|STREAMING|DEQUEUEING) to prep a buffer descriptor!"
              << endl;
         
         return false;
@@ -824,10 +855,15 @@ bool V4L2Cam::fillBuffer(v4l2_buffer& buf) noexcept
     buf = {};
     
     if ( !prepBuffer(buf) ) [[unlikely]]
+    {
         clog << "V4L2Cam::fillBuffer: sth. went wrong prepping the "
-                "v4l2_buffer structure for the fetch. Will try anyways. Might "
-                "work."
+                "v4l2_buffer structure for the fetch. "
+                ;
+        clog << "Will try anyways. Might work." // fucks up cam, but want to learn to rehabilitate
              << endl;
+        
+        // return false;
+    }
     
     bool succ = xioctl(*fd_ptr, VIDIOC_DQBUF, &buf);
     errNo     = errno;
@@ -2773,6 +2809,10 @@ bool V4L2Cam::applyResolutionAndPixelFormat()
     
     if ( xioctl(*fd_ptr, VIDIOC_G_FMT, &format, XIOCTL_FLAGS::EXPECT_EINVAL) )
     {
+        // clog << "V4L2Cam::applyResolutionAndPixelFormat: VIDIOC_G_FMT with "
+        //         "V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE succeeded"
+        //      << endl;
+        
         apiToUse = APIToUse::MULTI;
         
         format.fmt.pix_mp.width       = width      .value();
@@ -2797,6 +2837,10 @@ bool V4L2Cam::applyResolutionAndPixelFormat()
         
         if ( xioctl(*fd_ptr, VIDIOC_G_FMT, &format) )
         {
+            // clog << "V4L2Cam::applyResolutionAndPixelFormat: VIDIOC_G_FMT with "
+            //         "V4L2_BUF_TYPE_VIDEO_CAPTURE succeeded"
+            //      << endl;
+            
             apiToUse = APIToUse::SINGLE;
             
             format.fmt.pix.width       = width      .value();
@@ -2821,8 +2865,11 @@ bool V4L2Cam::applyResolutionAndPixelFormat()
     }
     
     
-    if ( xioctl(*fd_ptr, VIDIOC_S_FMT, &format) )
+    if ( xioctl(*fd_ptr, VIDIOC_S_FMT, &format) ) [[  likely]]
     {
+        // clog << "V4L2Cam::applyResolutionAndPixelFormat: VIDIOC_S_FMT succeeded"
+        //      << endl;
+        
         currentBufferSizeNeeded = format.fmt.pix.sizeimage;
         
         return true;
