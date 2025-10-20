@@ -309,6 +309,8 @@ public:
     bool queueBuffer(v4l2_buffer&) noexcept; // you're expected to have set the
                                              // index correctly, too
     
+    void reportSetup(std::ostream& out) noexcept;
+    
     bool startStreaming() noexcept;
     bool    isStreaming() noexcept { return    state == State::STREAMING
                                             || state == State::DEQUEUEING; }
@@ -385,6 +387,8 @@ private:
                                                , udev_device* parentDev
                                                ) = 0;
     
+    virtual void _reportSetup(std::ostream& out) noexcept = 0;
+    
     // only to be used by locateDeviceNodeAndInitialize()
     void initializeSettings();
     void    reapplySettings();
@@ -436,8 +440,15 @@ private:
     // settings values //
     //                 //
     
+    // to/from device (not just cache)
+    virtual bool                   _requestFramerate(uint8_t fps) noexcept = 0;
+    virtual std::optional<uint8_t> _produceFramerate()            noexcept = 0;
+    
 public:
     std::optional<v4l2_format> giveV4L2Format();
+    
+    bool                   requestFramerate(uint8_t fps) noexcept;
+    std::optional<uint8_t> produceFramerate()            noexcept;
     
     ssrc  tellResolutionSource() { return resolutionSource; }
     bool  giveResolution(uint32_t &     width, uint32_t &     height);

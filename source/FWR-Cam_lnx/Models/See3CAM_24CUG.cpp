@@ -223,6 +223,36 @@ void See3CAM_24CUG::initializeSettings() {
 }
 
 
+void See3CAM_24CUG::_reportSetup(ostream& out) noexcept
+{
+    out << "\n  stream mode\t: ";
+    
+    if ( !fetchStreamMode() ) [[unlikely]]
+        out << "could not get from device";
+    else
+    {
+        uint8_t sm{};
+        bool    _{};
+        
+        if ( !giveStreamMode(sm, _) ) [[unlikely]]
+            out << "have no valid value to provide";
+        else
+            out << to_string(sm);
+    }
+    
+    
+    
+    out << "\n  exposure compensation\t: ";
+    uint32_t expComp{};
+    if ( !fetchExposureCompensation() ) [[unlikely]]
+        out << "couldn't get value from device";
+    else if ( !giveExposureCompensation(expComp) ) [[unlikely]]
+        out << "have no valid value to provide";
+    else
+        out << to_string(expComp);
+}
+
+
 shared_ptr<V4L2Cam::FD_t> See3CAM_24CUG::produceHIDFD()
 {
     if ( hidPath.empty() ) [[unlikely]]
@@ -564,6 +594,44 @@ bool See3CAM_24CUG::drainHidInput(size_t reportLen)
 }
 
 
+
+
+/* ********* */
+/* Framerate */
+/* ********* */
+
+bool See3CAM_24CUG::_requestFramerate(uint8_t fps) noexcept
+{
+    if ( !takeFramerate(fps) ) [[unlikely]]
+        clog << "See3CAM_24CUG::_requestFramerate: didn't accept framerate."
+             << endl;
+    else if ( !applyFramerate() ) [[unlikely]]
+        clog << "See3CAM_24CUG::_requestFramerate: couldn't apply set framerate "
+                "to device."
+             << endl;
+    else
+        return true;
+    
+    return false;
+}
+
+optional<uint8_t> See3CAM_24CUG::_produceFramerate() noexcept
+{
+    uint8_t fps{};
+    
+    if ( !fetchFramerate() ) [[unlikely]]
+        clog << "See3CAM_24CUG::_produceFramerate: couldn't query device for "
+                "framerate"
+             << endl;
+    else if ( !giveFramerate(fps) ) [[unlikely]]
+        clog << "See3CAM_24CUG::_produceFramerate: don't have valid framerate "
+                "to return"
+             << endl;
+    else
+        return fps;
+    
+    return nullopt;
+}
 
 
 /* ************************** */

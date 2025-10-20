@@ -680,7 +680,7 @@ bool V4L2Cam::queueBuffer(v4l2_buffer& buf) noexcept
     
     if ( buffersQueued.test(buf.index) ) [[unlikely]]
         clog << "V4L2Cam::queueBuffer: given buffer queued, but there's already "
-                "one queued for that index! (I'll try to queue it anyway. "
+                "one queued at that index! (I'll try to queue it anyway. "
                 "Wanna see what happens.)"
              << endl;
     
@@ -698,6 +698,95 @@ bool V4L2Cam::queueBuffer(v4l2_buffer& buf) noexcept
     buffersQueued.set(buf.index);
     
     return true;
+}
+
+
+void V4L2Cam::reportSetup(ostream& out) noexcept
+{
+    if ( state != State::BUFFER_QUEUE_PREPPED ) [[unlikely]]
+    {
+        clog << "V4L2Cam::reportSetup: not in the correct state "
+                "(BUFFER_QUEUE_PREPPED) to report setup!"
+             << endl;
+        
+        return;
+    }
+    
+    out <<  "Cam setup report for serial No. \"" << serialNo << "\"";
+    
+    auto fmt_opt = giveV4L2Format();
+    
+    if ( fmt_opt ) [[  likely]]
+    {
+        if ( apiToUse == APIToUse::MULTI )
+        {
+            auto& fmt = (*fmt_opt).fmt.pix_mp;
+            out << "\n  width\t: " << to_string(fmt.width)
+                << "\n  heigth\t: " << to_string(fmt.height)
+                << "\n  pixel format\t:"
+                << '\'' 
+                << static_cast<char>((fmt.pixelformat >>  0) & 0xFF)
+                << static_cast<char>((fmt.pixelformat >>  8) & 0xFF)
+                << static_cast<char>((fmt.pixelformat >> 16) & 0xFF)
+                << static_cast<char>((fmt.pixelformat >> 24) & 0xFF)
+                << '\''
+                << "\n  field order\t: " << to_string(fmt.field);
+        }
+        else // APIToUse::SINGLE
+        {
+            auto& fmt = (*fmt_opt).fmt.pix;
+            out << "\n  width\t: " << to_string(fmt.width)
+                << "\n  heigth\t: " << to_string(fmt.height)
+                << "\n  pixel format\t:"
+                << '\'' 
+                << static_cast<char>((fmt.pixelformat >>  0) & 0xFF)
+                << static_cast<char>((fmt.pixelformat >>  8) & 0xFF)
+                << static_cast<char>((fmt.pixelformat >> 16) & 0xFF)
+                << static_cast<char>((fmt.pixelformat >> 24) & 0xFF)
+                << '\''
+                << "\n  field order\t: " << to_string(fmt.field);
+        }
+    }
+    else // no fmt
+        out << "\n  could not get v4l2_format from device!";
+        
+    out <<  "\n  buffer API to use\t: ";
+    switch ( apiToUse )
+    {
+        case APIToUse::UNKNOWN: out << "UNKNOWN"; break;
+        case APIToUse::MULTI  : out << "MULTI"  ; break;
+        case APIToUse::SINGLE : out << "SINGLE" ; break;
+        default               : out << "???"    ;
+    }
+    out <<  "\n  memory type\t: ";
+    switch ( memoryType )
+    {
+        case MemoryType::UNKNOWN: out << "UNKNOWN"; break;
+        case MemoryType::MMAP   : out << "MMAP"   ; break;
+        case MemoryType::USERPTR: out << "USERPTR"; break;
+        case MemoryType::DMABUF : out << "DMABUF" ; break;
+        default                 : out << "???"    ;
+    }
+    out <<  "\n  buffers queued\t: " << to_string(buffersQueued.count());
+     
+    out << "\n  framerate\t: ";
+    auto fps_opt = _produceFramerate();
+    if ( !fps_opt ) [[unlikely]]
+        out << "can't tell";
+    else
+        out << to_string(*fps_opt);
+    
+    out << "\n  exposure\t: ";
+    int32_t exp{};
+    if ( !fetchExposure() ) [[unlikely]]
+        out << "couldn't get value from device";
+    else if ( !giveExposure(exp) ) [[unlikely]]
+        out << "have no valid value to provide";
+    else
+        out << to_string(exp);
+    
+    
+    _reportSetup(out);
 }
 
 
@@ -1061,310 +1150,6 @@ bool V4L2Cam::releaseBufferQueue() noexcept
 }
 
 
-
-// static bool init_userp(uint32_t buffer_size)
-// {
-//     v4l2_requestbuffers req{};
-//     
-//     req.count  = NUM_BUFFS;
-//     req.type   = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-//     req.memory = V4L2_MEMORY_USERPTR;
-//     
-//     if ( !xioctl(fd, VIDIOC_REQBUFS, &req) )
-//     {
-//         if ( errno == EINVAL )
-//             fprintf( stderr
-//             , "The device does not support user pointer i/o\n"
-//             );
-//         
-//         return false;
-//     }
-//     
-//     buffers = (struct buffer *)calloc(req.count, sizeof(*buffers));
-//     
-//     if ( !buffers )
-//     {
-//         clog <<  "Out of memory\n");
-//         
-//         return false;
-//     }
-//     
-//     for ( n_buffers = 0; n_buffers < req.count; ++n_buffers )
-//     {
-//         buffers[n_buffers].length = buffer_size;
-//         
-//         if (    posix_memalign( &buffers[n_buffers].start
-//             , getpagesize()
-//             , buffer_size
-//         )
-//             != 0
-//         )
-//         {
-//             // This happens only in case of ENOMEM
-//             for ( int i = 0; i < n_buffers; i++ )
-//                 free(buffers[i].start);
-//             
-//             free(buffers);
-//             fprintf( stderr
-//             , "Error occurred when allocating memory for buffers\n"
-//             );
-//             
-//             return false;
-//         }
-//     }
-//     
-//     return true;
-// }
-// 
-// bool V4L2Cam::helper_init_cam( const char *devname
-//                              , uint32_t width
-//                              , uint32_t height
-//                              , uint32_t format
-//                              )
-// {
-//     if ( initialized )
-//     {
-//         clog << "V4L2Cam::Device already initialized." << endl;
-//         return false;
-//     }
-//     
-//     fd = xopen(devname, O_RDWR /* required */ | O_NONBLOCK);
-//     
-//     if ( fd < 0 )
-//     {
-//         clog << "V4L2Cam::Error occurred when opening cam v4l2 device node" << endl;
-//         return false;
-//     }
-//     
-//     if (    init_userp(currentBufferSizeNeeded) < 0
-//          || start_capturing() < 0
-//        )
-//     {
-//         clog << "V4L2Cam::Error occurred when initialising camera" << endl;
-//         return false;
-//     }
-//     
-//     initialized = true;
-//     return true;
-// }
-// 
-// bool V4L2Cam::helper_deinit_cam()
-// {
-//     if ( !initialized )
-//     {
-//         clog <<  "Error: trying to de-initialise without initialising camera\n");
-//         return false;
-//     }
-//     
-//     /*
-//      * It's better to turn off initialized even if the
-//      * de-initialisation fails as it shouldn't have affect
-//      * re-initialisation a lot.
-//      */
-//     initialized = false;
-//     
-//     if (    stop_capturing() < 0
-//          || uninit_device()  < 0
-//          || close_device()   < 0
-//        )
-//     {
-//         clog <<  "Error occurred when de-initialising camera\n");
-//         return false;
-//     }
-//     
-//     return true;
-// }
-// 
-// /**
-//  * Untested for misusages
-//  */
-// 
-// bool V4L2Cam::helper_change_cam_res( uint32_t width
-// , uint32_t height
-// // , uint32_t framerate // SB's addition
-// , uint32_t format
-// )
-// {
-//     if ( !initialized )
-//     {
-//         clog <<  "Error: trying to de-initialise without initialising camera\n");
-//         return false;
-//     }
-//     
-//     if (    stop_capturing() < 0
-//         || uninit_device()  < 0
-//     )
-//     {
-//         clog <<  "Error occurred when ude-initializing device to change camera resolution\n");
-//         return false;
-//     }
-//     
-//     initialized = 0;
-//     
-//     if (    set_io_method(io_meth)              < 0
-//         || init_userp(currentBufferSizeNeeded) < 0
-//         || start_capturing()                   < 0
-//     )
-//     {
-//         clog <<  "Error occurred when changing camera resolution\n");
-//         return false;
-//     }
-//     
-//     initialized = true;
-//     
-//     return true;
-// }
-// 
-// bool V4L2Cam::helper_get_cam_frame( unsigned char** pointer_to_cam_data
-//                                   , int32_t* size
-//                                   )
-// {
-//     static unsigned char max_timeout_retries = 2;
-//     unsigned char timeout_retries = 0;
-//     
-//     if ( !initialized )
-//     {
-//         clog <<  "Error: trying to get frame without successfully initialising camera\n");
-//         return false;
-//     }
-//     
-//     if ( !is_released )
-//     {
-//         fprintf( stderr
-//                , "Error: trying to get another frame without "
-//                         "releasing already obtained frame\n"
-//                );
-//         return false;
-//     }
-//     
-//     for ( size_t i = 0; i < 10; i++ )
-//     //  (;;)
-//     {
-//         fd_set fds;
-//         struct timeval tv;
-//         int32_t r;
-//         
-//         FD_ZERO(&fds);
-//         FD_SET(fd, &fds);
-//         
-//         /* Timeout. */
-//         tv.tv_sec = 1;
-//         tv.tv_usec = 0;
-//         
-//         memset(&frame_buf, 0, sizeof(frame_buf));
-//         
-//         frame_buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-//         
-//         r = select(fd + 1, &fds, NULL, NULL, &tv);
-//         // printf("r = %d\n", r);
-//         
-//         if ( r == -1 )
-//         {
-//             clog <<  "V4L2Cam::helper_get_cam_frame: select -1\n");
-//             if ( errno == EINTR )
-//                 continue;
-//         }
-//         
-//         if ( r == 0 )
-//         {
-//             clog <<  "V4L2Cam::helper_get_cam_frame: select timeout\n");
-//             return false;
-//             // timeout_retries++;
-// 
-//             // if (timeout_retries == max_timeout_retries)
-//             // {
-//             // clog <<  "V4L2Cam::helper_get_cam_frame: Could not get frame after multiple retries\n");
-//             // return false;
-//             // }
-//         }
-//         
-//         if ( !xioctl(fd, VIDIOC_DQBUF, &frame_buf) )
-//         {
-//             switch ( errno )
-//             {
-//             case EAGAIN:
-//                 continue;
-//             
-//             case EIO:
-//                 /* Could ignore EIO, see spec. */
-// 
-//                 [[fallthrough]]
-// 
-//             default:
-//                 continue;
-//             }
-//         }
-//         
-//         *pointer_to_cam_data = (unsigned char *)buffers[frame_buf.index].start;
-//         *size = frame_buf.bytesused;
-//         break;
-//         /* EAGAIN - continue select loop. */
-//     }
-//     
-//     is_released = false;
-//     return true;
-// }
-// 
-// bool V4L2Cam::helper_release_cam_frame()
-// {
-//     if ( !initialized )
-//     {
-//         clog <<  "Error: trying to release frame without successfully initialising camera\n");
-//         return false;
-//     }
-//     
-//     if ( is_released )
-//     {
-//         clog <<  "Error: trying to release already released frame\n");
-//         return false;
-//     }
-//     
-//     if ( !xioctl(fd, VIDIOC_QBUF, &frame_buf) )
-//     {
-//         clog <<  "Error occurred when queueing frame for re-capture\n");
-//         return false;
-//     }
-//     
-//     /*
-//      * We assume the frame hasn't been released if an error occurred as
-//      * we couldn't queue the frame for streaming.
-//      *
-//      * Assuming it to be released in case an error occurs causes issues
-//      * such as the loss of a buffer, etc.
-//      */
-//     is_released = true;
-//     
-//     return true;
-// }
-
-
-/**
- * Untested for misusages
-
-bool V4L2Cam::helper_queryctrl( uint32_t id
-                              , v4l2_queryctrl* qctrl
-                              )
-{
-    if ( !initialized )
-    {
-        fprintf( stderr
-               , "Error: trying to query control without initialising camera\n"
-              );
-        return false;
-    }
-    
-    qctrl->id = id;
-    if ( xioctl(fd, VIDIOC_QUERYCTRL, qctrl) == -1 ) {
-        clog <<  "Error QUERYCTRL\n");
-        return false;
-    }
-    
-    return true;
-}
-
-*/
-
-
 V4L2Cam::V4L2Cam(string const& sNo) noexcept
  :  V4L2CamData(sNo)
 {
@@ -1375,7 +1160,7 @@ V4L2Cam::~V4L2Cam() noexcept
 {
     superObjectCannotExist = true;
     
-    tryAndStopStreaming(true); // aborts, if it doesn't work out!
+    tryAndStopStreaming(true); // `std::terminate`s, if it doesn't work out!
     
     if ( state == State::BUFFER_QUEUE_PREPPED ) [[unlikely]]
         releaseBufferQueue();
@@ -2150,10 +1935,7 @@ bool V4L2Cam::tryAndStopStreaming(bool hard) noexcept
                 clog << " KILLING THIS PROCESS!!!"
                      << endl;
                 
-                // allow time for log output/publishing
-                this_thread::sleep_for(chrono::milliseconds(100));
-                
-                abort();
+                std::terminate();
             }
             
             clog << endl;
@@ -2615,6 +2397,37 @@ optional<v4l2_format> V4L2Cam::giveV4L2Format()
          << strerror(errNo) << endl;
     
     return {};
+}
+
+
+/* ********* */
+/* Framerate */
+/* ********* */
+
+bool V4L2Cam::requestFramerate(uint8_t fps) noexcept
+{
+    if ( !_requestFramerate(fps) ) [[unlikely]]
+    {
+        clog << "V4L2Cam::requestFramerate: implementation didn't accept "
+                "framerate!"
+             << endl;
+        
+        return false;
+    }
+    
+    return true;
+}
+
+optional<uint8_t> V4L2Cam::produceFramerate() noexcept
+{
+    auto fps_opt = _produceFramerate();
+    
+    if ( !fps_opt.has_value() ) [[unlikely]]
+        clog << "V4L2Cam::produceFramerate: implementation could not produce "
+                "in-effect framerate!"
+             << endl;
+    
+    return fps_opt;
 }
 
 

@@ -94,6 +94,8 @@ private:
                                                ) override;
     void initializeSettings();
     
+    virtual void _reportSetup(std::ostream& out) noexcept override;
+    
     std::shared_ptr<FD_t> produceHIDFD();
     bool                     openHIDFD();
     void                    closeHIDFD();
@@ -214,6 +216,10 @@ public:
     bool setToDefault();
     
 private:
+    
+    virtual bool                   _requestFramerate(uint8_t fps) noexcept override;
+    virtual std::optional<uint8_t> _produceFramerate()            noexcept override;
+    
     virtual bool _checkResolution(uint32_t const, uint32_t const) override;
     virtual bool _checkPixelFormat(uint32_t const) override;
     
