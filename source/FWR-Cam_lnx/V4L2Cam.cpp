@@ -69,11 +69,10 @@ using namespace magic_enum;
 using namespace magic_enum::bitwise_operators;
 
 
-// struct buffer
-// {
-//     void *start;
-//     size_t length;
-// };
+constexpr std::string_view to_string_view(ErrorAction ea) noexcept
+{
+    return magic_enum::enum_name(ea);
+}
 
 
 V4L2CamData::V4L2CamData(string const& sNo) noexcept
@@ -1322,22 +1321,28 @@ bool V4L2Cam::xioctl( FD_t const&  fd
         // Handle specific errors and set action flags
         switch ( errNo )
         {
-            // Errors indicating that uninitializing the camera abstraction class is appropriate
+            // Errors indicating that forgetting the device is appropriate
             case ENODEV:    [[fallthrough]]; // No such device
             case ENXIO:     [[fallthrough]]; // No such device or address
             case EBADF:                     // Bad file descriptor
                 clog << "V4L2Cam::xioctl: Error: Device is no longer available ("
                      << strerror(errNo)
-                     << "). Uninitializing camera class is indicated."
+                     << "). Forgetting all about the device is indicated."
                      << endl;
                 
-                errorAction = ErrorAction::Uninitialize;
+                errorAction = ErrorAction::ForgetDevice;
                 break;
             
             // Errors indicating that resetting the camera abstraction class is appropriate
             case EBUSY:                      // Device or resource busy after retries
                 if ( state == State::STREAMING )
+                // I interpret this as "what you're trying to do won't work
+                // while streaming". Am I right/wrong?
                 {
+                    clog << "V4L2Cam::xioctl: ioctl failed with EBUSY while in "
+                            "streaming mode"
+                         << endl;
+                    
                     errorAction = ErrorAction::StopStreaming;
                     break;
                 }
@@ -1349,7 +1354,7 @@ bool V4L2Cam::xioctl( FD_t const&  fd
                      << "). Resetting camera class is indicated."
                      << endl;
                 
-                errorAction = ErrorAction::ReopenDescriptors;
+                errorAction = ErrorAction::Reinitialize;
                 break;
             
             // Errors indicating that power-cycling the USB camera is appropriate
@@ -1380,20 +1385,21 @@ bool V4L2Cam::xioctl( FD_t const&  fd
                                )
                                 return false;
                             else
-                                [[fallthrough]]; // Invalid argument
+                                goto WRONG_USAGE; // Invalid argument
             case EDOM  :    if (    ( callFlags & XIOCTL_FLAGS::EXPECT_EDOM)
                                  != XIOCTL_FLAGS::NONE
                                )
                                 return false;
                             else
-                                [[fallthrough]]; // Argument out of domain
+                                goto WRONG_USAGE; // Argument out of domain
             case ENOTTY:    if (    ( callFlags & XIOCTL_FLAGS::EXPECT_ENOTTY)
                                  != XIOCTL_FLAGS::NONE
                                )
                                 return false;
                             else
-                                [[fallthrough]]; // Inappropriate ioctl for device
+                                goto WRONG_USAGE; // Inappropriate ioctl for device
             case EOVERFLOW:                  // Value too large for defined data type
+WRONG_USAGE:
                 clog << "V4L2Cam::xioctl: Error: Invalid request or argument ("
                      << strerror(errNo)
                      << "). Check configuration is indicated."

@@ -39,6 +39,19 @@ namespace FWR::Cam_lnx
 {
 
 
+enum class ErrorAction : uint8_t { None
+                                 , StopStreaming
+                                 , Reinitialize
+                                 , PowerCycle
+                                 , ForgetDevice
+                                 , FreeMemory
+                                 , CheckPermissions
+                                 , CheckLogic
+                                 };
+
+constexpr std::string_view to_string_view(ErrorAction ea) noexcept;
+
+
 struct V4L2CamData
 {
     static constexpr uint8_t MAX_BUFFERS = 8;
@@ -67,17 +80,6 @@ struct V4L2CamData
                                        , DMABUF
                                        };
     enum class APIToUse      : uint8_t { UNKNOWN, MULTI, SINGLE  };
-    
-    enum class ErrorAction { None
-                           , StopStreaming
-                           , ReopenDescriptors
-                           , Reinitialize
-                           , PowerCycle
-                           , Uninitialize
-                           , FreeMemory
-                           , CheckPermissions
-                           , CheckLogic
-                           };
     
     // file descriptor helper struct
     struct FD_t
