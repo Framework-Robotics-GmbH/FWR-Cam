@@ -42,11 +42,11 @@ namespace FWR::Cam_lnx
 enum class ErrorAction : uint8_t { None
                                  , StopStreaming
                                  , Reinitialize
-                                 , PowerCycle
-                                 , ForgetDevice
+                                 , ResetDevice
                                  , FreeMemory
                                  , CheckPermissions
                                  , CheckLogic
+                                 , ForgetDevice
                                  };
 
 constexpr std::string_view to_string_view(ErrorAction ea) noexcept;
@@ -54,32 +54,45 @@ constexpr std::string_view to_string_view(ErrorAction ea) noexcept;
 
 struct V4L2CamData
 {
-    static constexpr uint8_t MAX_BUFFERS = 8;
-    static constexpr uint8_t MAX_PLANES  = 4;
+    static constexpr uint8_t  MAX_BUFFERS        = 8;
+    static constexpr uint8_t  MAX_PLANES         = 4;
+    static constexpr uint16_t FRAME_POLL_TIMEOUT = 3000; // ms
     
     // the `EXPECT_*`s mean, treat them as failures still, but not as errors
-    enum class XIOCTL_FLAGS : uint8_t { NONE           = 0
-                                      , QUASI_BLOCKING = 1 << 0
-                                      , EXPECT_EINVAL  = 1 << 1
-                                      , EXPECT_EDOM    = 1 << 2
-                                      , EXPECT_ENOTTY  = 1 << 3
-                                      };
+    enum class XIOCTL_FLAGS   : uint8_t { NONE           = 0
+                                        , QUASI_BLOCKING = 1 << 0
+                                        , EXPECT_EINVAL  = 1 << 1
+                                        , EXPECT_EDOM    = 1 << 2
+                                        , EXPECT_ENOTTY  = 1 << 3
+                                        };
     
     
-    enum class SettingSource : uint8_t { UNKNOWN, GIVEN, FETCHED };
-    enum class State         : uint8_t { UNINITIALIZED
-                                       , DEVICE_KNOWN
-                                       , INITIALIZED
-                                       , BUFFER_QUEUE_PREPPED
-                                       , STREAMING
-                                       , DEQUEUEING
-                                       };
-    enum class MemoryType    : uint8_t { UNKNOWN
-                                       , MMAP    // NIY
-                                       , USERPTR
-                                       , DMABUF
-                                       };
-    enum class APIToUse      : uint8_t { UNKNOWN, MULTI, SINGLE  };
+    enum class SettingSource  : uint8_t { UNKNOWN
+                                        , GIVEN
+                                        , FETCHED
+                                        };
+    enum class State          : uint8_t { UNINITIALIZED
+                                        , DEVICE_KNOWN
+                                        , INITIALIZED
+                                        , BUFFER_QUEUE_PREPPED
+                                        , STREAMING
+                                        , DEQUEUEING
+                                        };
+    enum class ResetMeasure   : uint8_t { NONE
+                                        , USB_IFACE_REBIND
+                                        , USB_DEVFS_RESET
+                                        , USB_PORT_RESET
+                                        , USB_PORT_POWER_CYCLE
+                                        };
+    enum class MemoryType     : uint8_t { UNKNOWN
+                                        , MMAP    // NIY
+                                        , USERPTR
+                                        , DMABUF
+                                        };
+    enum class APIToUse       : uint8_t { UNKNOWN
+                                        , MULTI
+                                        , SINGLE
+                                        };
     
     // file descriptor helper struct
     struct FD_t
@@ -143,6 +156,7 @@ struct V4L2CamData
     std::shared_ptr<FD_t>    evntFD{};
     
     State                    state{State::UNINITIALIZED};
+    ResetMeasure             lastResetMeasure{ResetMeasure::None};
     
     uint8_t                  bufferCount{};
     SmallBitset<MAX_BUFFERS> buffersQueued{};
@@ -322,6 +336,9 @@ public:
     
     bool releaseBufferQueue() noexcept;
     
+    bool reinitialize() noexcept; // for realizing ErrorAction::Reinitialize
+    bool resetDevice () noexcept; // for realizing ErrorAction::ResetDevice
+    
     
     inline // for when you got false for requestBufferQueue
     size_t produceActualQueueSize() const noexcept {return bufferCount; }
@@ -408,14 +425,20 @@ private:
     
     bool tryAndStopStreaming(bool hard = false) noexcept;
     
-    void uninitialize();
-    bool rebindUSBDevice();
-    bool powerCycleDevice();
-    bool produceHubHandleAndPortNumber( libusb_context* const     ctx
+    void      uninitialize(bool hard = false) noexcept;
+    bool   rebindUSBDevice( std::string const& usbKernelName     ) noexcept;
+    bool    resetUSBDevice( std::string const& usbBusNumber
+                          , std::string const& usbDeviceAddress  ) noexcept;
+    bool resetAtUSBHubPort( std::string const& usbBusNumber
+                          , std::string const& usbDeviceAddress
+                          , bool               powerCycle = false) noexcept;
+    bool produceHubHandleAndPortNumber( std::string const&        usbBusNumber
+                                      , std::string const&        usbDeviceAddress
+                                      , libusb_context* const     ctx
                                       , libusb_device_handle*&    hub_handle
-                                      , libusb_device_descriptor& hub_desc
+                                      // , libusb_device_descriptor& hub_desc
                                       , uint8_t&                  port
-                                      );
+                                      ) noexcept;
     
     virtual void _uninitialize() = 0;
     

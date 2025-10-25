@@ -183,9 +183,14 @@ bool See3CAM_24CUG::_locateDeviceNodeAndInitialize( udev       * uDev
             clog << "See3CAM_24CUG::_locateDeviceNodeAndInitialize: Could not "
                     "ensure HIDraw device interface is ready to be used!"
                  << endl;
-        else
+        else if ( state == State::UNINITIALIZED )
         {
             initializeSettings();
+            initialized = true;
+        }
+        else /* state == State::DEVICE_KNOWN */
+        {
+            reapplySettings();
             initialized = true;
         }
         
@@ -206,7 +211,8 @@ bool See3CAM_24CUG::_locateDeviceNodeAndInitialize( udev       * uDev
     
 }
 
-void See3CAM_24CUG::initializeSettings() {
+void See3CAM_24CUG::initializeSettings() noexcept
+{
     fetchEffectMode();
     fetchDeNoiseValue();
     fetchAutoExpoModeAndROI();
@@ -220,6 +226,23 @@ void See3CAM_24CUG::initializeSettings() {
     fetchFlickerDetectMode();
     fetchFlashMode();
     fetchStreamMode();
+}
+
+void See3CAM_24CUG::reapplySettings() noexcept
+{
+    applyEffectMode();
+    applyDeNoiseValue();
+    applyAutoExpoModeAndROI();
+    applyExposureCompensation();
+    applyBurstLength();
+    applyQFactor();
+    applyMirrorMode();
+    applyFramerate();
+    applyFaceDetectMode();
+    applySmileDetectMode();
+    applyFlickerDetectMode();
+    applyFlashMode();
+    applyStreamMode();
 }
 
 

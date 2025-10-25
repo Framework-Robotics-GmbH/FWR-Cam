@@ -92,7 +92,8 @@ private:
     virtual bool _locateDeviceNodeAndInitialize( udev       * uDev
                                                , udev_device* parentDev
                                                ) override;
-    void initializeSettings();
+    void initializeSettings() noexcept;
+    void    reapplySettings() noexcept;
     
     virtual void _reportSetup(std::ostream& out) noexcept override;
     
