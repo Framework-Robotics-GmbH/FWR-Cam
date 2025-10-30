@@ -670,15 +670,11 @@ bool See3CAM_24CUG::_checkResolution(uint32_t const _width, uint32_t const _heig
     return false;
 }
 
-bool See3CAM_24CUG::_checkPixelFormat(uint32_t const _pixelFormat)
+bool See3CAM_24CUG::_checkPixelFormat(PixelFormat const _pixelFormat)
 {
-    switch(static_cast<SupportedPixelFormat>(_pixelFormat))
-    {
-        // TODO keep in-sync with SupportedPixelFormat
-        case SupportedPixelFormat::UYVY : return true;
-        case SupportedPixelFormat::MJPEG: return true;
-        default                         : return false;
-    }
+    auto pfInt = enum_integer(_pixelFormat);
+    
+    return enum_cast<SupportedPixelFormat>(pfInt).has_value();
 }
 
 

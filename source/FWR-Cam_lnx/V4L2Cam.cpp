@@ -71,13 +71,23 @@ using namespace magic_enum::bitwise_operators;
 
 constexpr std::string_view to_string_view(ErrorAction ea) noexcept
 {
-    return magic_enum::enum_name(ea);
+    return enum_name(ea);
+}
+
+constexpr std::string_view to_string_view(PixelFormat pf) noexcept
+{
+    return enum_name(pf);
+}
+
+constexpr uint32_t to_integer(PixelFormat pf) noexcept
+{
+    return enum_integer(pf);
 }
 
 // only bumps up
 static inline void update(ErrorAction& ea, ErrorAction val) noexcept
 {
-    if ( magic_enum::enum_integer(val) > magic_enum::enum_integer(ea) )
+    if ( enum_integer(val) > enum_integer(ea) )
         ea = val;
 }
 
@@ -2861,28 +2871,28 @@ bool V4L2Cam::checkResolution()
 }
 
 
-bool V4L2Cam::givePixelFormat(uint32_t & _pixelFormat)
+bool V4L2Cam::givePixelFormat(PixelFormat & _pixelFormat)
 {
     if ( !checkPixelFormat() ) [[unlikely]]
         return false;
     
-    _pixelFormat = enum_integer(pixelFormat.value());
+    _pixelFormat = pixelFormat.value();
     
     return true;
 }
 
-bool V4L2Cam::takePixelFormat(uint32_t const _pixelFormat)
+bool V4L2Cam::takePixelFormat(PixelFormat const _pixelFormat)
 {
     if ( !checkPixelFormat(_pixelFormat) ) [[unlikely]]
         return false;
     
-    pixelFormat       = static_cast<PixelFormat>(_pixelFormat);
+    pixelFormat       = _pixelFormat;
     pixelFormatSource = ssrc::GIVEN;
     
     return true;
 }
 
-bool V4L2Cam::checkPixelFormat(uint32_t const _pixelFormat)
+bool V4L2Cam::checkPixelFormat(PixelFormat const _pixelFormat)
 {
     if ( PIXEL_FORMAT_DOMAIN_KNOWN ) {
         // TODO check against known value domain // NIY
@@ -2895,7 +2905,7 @@ bool V4L2Cam::checkPixelFormat(uint32_t const _pixelFormat)
 bool V4L2Cam::checkPixelFormat()
 {
     return    pixelFormat.has_value()
-           && checkPixelFormat(static_cast<uint32_t>(pixelFormat.value()));
+           && checkPixelFormat(pixelFormat.value());
 }
 
 
@@ -2929,10 +2939,7 @@ bool V4L2Cam::fetchResolutionAndPixelFormat()
             height.reset();
         }
         
-        if ( checkPixelFormat(format.fmt.pix_mp.pixelformat) )
-            pixelFormat = static_cast<PixelFormat>(format.fmt.pix_mp.pixelformat);
-        else
-            pixelFormat.reset();
+        pixelFormat = enum_cast<PixelFormat>(format.fmt.pix_mp.pixelformat);
         
         if ( format.fmt.pix_mp.num_planes == 1 ) // currently, we support no more
             currentBufferSizeNeeded
@@ -2964,10 +2971,7 @@ bool V4L2Cam::fetchResolutionAndPixelFormat()
             height.reset();
         }
         
-        if ( checkPixelFormat(format.fmt.pix.pixelformat) )
-            pixelFormat = static_cast<PixelFormat>(format.fmt.pix.pixelformat);
-        else
-            pixelFormat.reset();
+        pixelFormat = enum_cast<PixelFormat>(format.fmt.pix.pixelformat);
         
         currentBufferSizeNeeded = format.fmt.pix.sizeimage;
         

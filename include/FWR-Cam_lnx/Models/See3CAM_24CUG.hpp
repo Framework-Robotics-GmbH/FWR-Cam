@@ -222,7 +222,7 @@ private:
     virtual std::optional<uint8_t> _produceFramerate()            noexcept override;
     
     virtual bool _checkResolution(uint32_t const, uint32_t const) override;
-    virtual bool _checkPixelFormat(uint32_t const) override;
+    virtual bool _checkPixelFormat(PixelFormat const) override;
     
     // in the .cpp, those checkers are between their respective take* and fetch*
     bool checkDeNoiseValue();
@@ -246,9 +246,11 @@ private:
     }};
     
     enum class SupportedPixelFormat : uint32_t {
-        // YUYV   = ('Y' | ('U' << 8) | ('Y' << 16) | ('V' << 24)), // 'YUYV'
-        UYVY   = ('U' | ('Y' << 8) | ('V' << 16) | ('Y' << 24)), // 'UYVY'
-        MJPEG  = ('M' | ('J' << 8) | ('P' << 16) | ('G' << 24)), // 'MJPG'
+        // // YUYV   = ('Y' | ('U' << 8) | ('Y' << 16) | ('V' << 24)), // 'YUYV'
+        // UYVY   = ('U' | ('Y' << 8) | ('V' << 16) | ('Y' << 24)), // 'UYVY'
+        // MJPEG  = ('M' | ('J' << 8) | ('P' << 16) | ('G' << 24)), // 'MJPG'
+        UYVY   = PixelFormat::UYVY;
+        MJPEG  = PixelFormat::MJPEG;
     };
     
     

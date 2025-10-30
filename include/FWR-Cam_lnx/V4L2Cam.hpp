@@ -52,6 +52,39 @@ enum class ErrorAction : uint8_t { None
 constexpr std::string_view to_string_view(ErrorAction ea) noexcept;
 
 
+// For now just documentation-ish
+enum class PixelFormat : uint32_t
+{
+    INVALID = 0, // well, INVALID
+    RGB332  = ('R' | ('G' << 8) | ('B' << 16) | ('1' << 24)), // 'RGB1' in little-endian
+    RGB565  = ('R' | ('G' << 8) | ('B' << 16) | ('P' << 24)), // 'RGBP'
+    RGB24   = ('R' | ('G' << 8) | ('B' << 16) | ('3' << 24)), // 'RGB3'
+    RGB32   = ('R' | ('G' << 8) | ('B' << 16) | ('4' << 24)), // 'RGB4'
+    GREY    = ('G' | ('R' << 8) | ('E' << 16) | ('Y' << 24)), // 'GREY'
+    YUYV    = ('Y' | ('U' << 8) | ('Y' << 16) | ('V' << 24)), // 'YUYV'
+    UYVY    = ('U' | ('Y' << 8) | ('V' << 16) | ('Y' << 24)), // 'UYVY'
+    MJPEG   = ('M' | ('J' << 8) | ('P' << 16) | ('G' << 24)), // 'MJPG'
+    H264    = ('H' | ('2' << 8) | ('6' << 16) | ('4' << 24)), // 'H264'
+    NV12    = ('N' | ('V' << 8) | ('1' << 16) | ('2' << 24)), // 'NV12'
+    NV21    = ('N' | ('V' << 8) | ('2' << 16) | ('1' << 24)), // 'NV21'
+    YUV420  = ('Y' | ('U' << 8) | ('1' << 16) | ('2' << 24)), // 'YU12'
+    YVU420  = ('Y' | ('V' << 8) | ('1' << 16) | ('2' << 24))  // 'YV12'
+};
+
+constexpr std::string_view to_string_view(PixelFormat pf) noexcept;
+constexpr uint32_t         to_integer    (PixelFormat pf) noexcept;
+
+
+enum class PowerLineFrequency : uint8_t
+{
+    DISABLED  = 0, // Disable anti-flicker adjustment
+    FREQ_50HZ = 1, // Anti-flicker adjustment for 50 Hz
+    FREQ_60HZ = 2, // Anti-flicker adjustment for 60 Hz
+    AUTO      = 3  // Automatically detect and adjust
+};
+
+
+
 struct V4L2CamData
 {
     static constexpr uint8_t  MAX_BUFFERS        = 8;
@@ -178,31 +211,6 @@ struct V4L2CamData
     //                           //
     // settings domain knowledge //
     //                           //
-    
-    // For now just documentation-ish
-    enum class PixelFormat : uint32_t {
-        RGB332 = ('R' | ('G' << 8) | ('B' << 16) | ('1' << 24)), // 'RGB1' in little-endian
-        RGB565 = ('R' | ('G' << 8) | ('B' << 16) | ('P' << 24)), // 'RGBP'
-        RGB24  = ('R' | ('G' << 8) | ('B' << 16) | ('3' << 24)), // 'RGB3'
-        RGB32  = ('R' | ('G' << 8) | ('B' << 16) | ('4' << 24)), // 'RGB4'
-        GREY   = ('G' | ('R' << 8) | ('E' << 16) | ('Y' << 24)), // 'GREY'
-        YUYV   = ('Y' | ('U' << 8) | ('Y' << 16) | ('V' << 24)), // 'YUYV'
-        UYVY   = ('U' | ('Y' << 8) | ('V' << 16) | ('Y' << 24)), // 'UYVY'
-        MJPEG  = ('M' | ('J' << 8) | ('P' << 16) | ('G' << 24)), // 'MJPG'
-        H264   = ('H' | ('2' << 8) | ('6' << 16) | ('4' << 24)), // 'H264'
-        NV12   = ('N' | ('V' << 8) | ('1' << 16) | ('2' << 24)), // 'NV12'
-        NV21   = ('N' | ('V' << 8) | ('2' << 16) | ('1' << 24)), // 'NV21'
-        YUV420 = ('Y' | ('U' << 8) | ('1' << 16) | ('2' << 24)), // 'YU12'
-        YVU420 = ('Y' | ('V' << 8) | ('1' << 16) | ('2' << 24))  // 'YV12'
-    };
-    
-    enum class PowerLineFrequency : uint8_t {
-        DISABLED  = 0, // Disable anti-flicker adjustment
-        FREQ_50HZ = 1, // Anti-flicker adjustment for 50 Hz
-        FREQ_60HZ = 2, // Anti-flicker adjustment for 60 Hz
-        AUTO      = 3  // Automatically detect and adjust
-    };
-    
     
     bool SUPPORTS__VIDIOC_TRY_FMT{};
     
@@ -336,6 +344,12 @@ public:
     
     bool releaseBufferQueue() noexcept;
     
+    inline
+    void resetTrivialErrorAction() noexcept
+    {
+        if ( errorAction == ErrorAction::StopStreaming )
+             errorAction =  ErrorAction::None;
+    }
     bool reinitialize() noexcept; // for realizing ErrorAction::Reinitialize
     bool resetDevice () noexcept; // for realizing ErrorAction::ResetDevice
     
@@ -480,8 +494,8 @@ public:
     bool  takeResolution(uint32_t const width, uint32_t const height);
     
     ssrc  tellPixelFormatSource() { return pixelFormatSource; }
-    bool  givePixelFormat(uint32_t &     pixelFormat);
-    bool  takePixelFormat(uint32_t const pixelFormat);
+    bool  givePixelFormat(PixelFormat &     pixelFormat);
+    bool  takePixelFormat(PixelFormat const pixelFormat);
     
     bool fetchResolutionAndPixelFormat();
     bool applyResolutionAndPixelFormat();
@@ -549,9 +563,9 @@ private:
     bool checkResolution();
     virtual bool _checkResolution(uint32_t const, uint32_t const) { return true; }
     
-    bool checkPixelFormat(uint32_t const pixelFormat);
+    bool checkPixelFormat(PixelFormat const pixelFormat);
     bool checkPixelFormat();
-    virtual bool _checkPixelFormat(uint32_t const) { return true; }
+    virtual bool _checkPixelFormat(PixelFormat const) { return true; }
     
     bool checkBrightness(int32_t const brightness);
     bool checkBrightness();
