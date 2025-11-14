@@ -43,6 +43,7 @@ enum class ErrorAction : uint8_t { None
                                  , StopStreaming
                                  , Reinitialize
                                  , ResetDevice
+                                 , USBPowerCycle // when higher-ups must do it
                                  , FreeMemory
                                  , CheckPermissions
                                  , CheckLogic
@@ -115,6 +116,7 @@ struct V4L2CamData
                                         , USB_IFACE_REBIND
                                         , USB_DEVFS_RESET
                                         , USB_PORT_RESET
+                                        , USB_PORT_POWER_CYCLE_REQUESTED
                                         , USB_PORT_POWER_CYCLE
                                         };
     enum class MemoryType     : uint8_t { UNKNOWN
@@ -189,7 +191,7 @@ struct V4L2CamData
     std::shared_ptr<FD_t>    evntFD{};
     
     State                    state{State::UNINITIALIZED};
-    ResetMeasure             lastResetMeasure{ResetMeasure::None};
+    ResetMeasure             lastResetMeasure{ResetMeasure::NONE};
     
     uint8_t                  bufferCount{};
     SmallBitset<MAX_BUFFERS> buffersQueued{};
@@ -301,6 +303,9 @@ struct V4L2CamData
 class V4L2Cam
  :  protected V4L2CamData
 {
+public:
+    static bool hubCanPowerCyclePerPort;
+    
     // in this class there should be no data members other than the inherited
     
 protected:
@@ -320,6 +325,7 @@ public:
     inline
     bool isJustInitialized() const noexcept { return state == State::INITIALIZED; }
     bool goIntoInitializedState() noexcept;
+    void goIntoUninitializedState() noexcept;
     
     bool locateDeviceNodeAndInitialize();
     
@@ -350,8 +356,10 @@ public:
         if ( errorAction == ErrorAction::StopStreaming )
              errorAction =  ErrorAction::None;
     }
-    bool reinitialize() noexcept; // for realizing ErrorAction::Reinitialize
-    bool resetDevice () noexcept; // for realizing ErrorAction::ResetDevice
+    bool          reinitialize() noexcept; // for realizing ErrorAction::Reinitialize
+    bool          resetDevice () noexcept; // for realizing ErrorAction::ResetDevice
+    void powerCyclingConducted() noexcept; // after the deed was done by higher-ups,
+                                           // to adjust inner state
     
     
     inline // for when you got false for requestBufferQueue
@@ -446,12 +454,11 @@ private:
     bool resetAtUSBHubPort( std::string const& usbBusNumber
                           , std::string const& usbDeviceAddress
                           , bool               powerCycle = false) noexcept;
-    bool produceHubHandleAndPortNumber( std::string const&        usbBusNumber
-                                      , std::string const&        usbDeviceAddress
-                                      , libusb_context* const     ctx
-                                      , libusb_device_handle*&    hub_handle
-                                      // , libusb_device_descriptor& hub_desc
-                                      , uint8_t&                  port
+    bool produceHubHandleAndPortNumber( std::string const&      usbBusNumber
+                                      , std::string const&      usbDeviceAddress
+                                      , libusb_context *        ctx
+                                      , libusb_device_handle *& hub_handle
+                                      , uint8_t&                port
                                       ) noexcept;
     
     virtual void _uninitialize() = 0;

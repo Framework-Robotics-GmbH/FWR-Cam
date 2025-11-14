@@ -249,8 +249,8 @@ private:
         // // YUYV   = ('Y' | ('U' << 8) | ('Y' << 16) | ('V' << 24)), // 'YUYV'
         // UYVY   = ('U' | ('Y' << 8) | ('V' << 16) | ('Y' << 24)), // 'UYVY'
         // MJPEG  = ('M' | ('J' << 8) | ('P' << 16) | ('G' << 24)), // 'MJPG'
-        UYVY   = PixelFormat::UYVY;
-        MJPEG  = PixelFormat::MJPEG;
+        UYVY   = static_cast<uint32_t>(PixelFormat::UYVY),
+        MJPEG  = static_cast<uint32_t>(PixelFormat::MJPEG)
     };
     
     

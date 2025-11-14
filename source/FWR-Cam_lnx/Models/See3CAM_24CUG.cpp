@@ -672,9 +672,13 @@ bool See3CAM_24CUG::_checkResolution(uint32_t const _width, uint32_t const _heig
 
 bool See3CAM_24CUG::_checkPixelFormat(PixelFormat const _pixelFormat)
 {
-    auto pfInt = enum_integer(_pixelFormat);
+    using  pfInt = std::underlying_type_t<PixelFormat>;
+    using spfInt = std::underlying_type_t<SupportedPixelFormat>;
     
-    return enum_cast<SupportedPixelFormat>(pfInt).has_value();
+    return       static_cast< pfInt>(_pixelFormat)
+              == static_cast<spfInt>(SupportedPixelFormat::UYVY)
+           ||    static_cast< pfInt>(_pixelFormat)
+              == static_cast<spfInt>(SupportedPixelFormat::UYVY);
 }
 
 
