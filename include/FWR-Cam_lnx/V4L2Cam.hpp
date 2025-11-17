@@ -52,6 +52,16 @@ enum class ErrorAction : uint8_t { None
 
 constexpr std::string_view to_string_view(ErrorAction ea) noexcept;
 
+// to store it whithin resetDevice before uninitialize(), in case we don't manage
+// to reinitialize, so user code can still retrieve it
+struct USBID
+{
+    std::string kernelName{};
+    std::string busNumber{};
+    std::string deviceAddress{};
+};
+
+
 
 // For now just documentation-ish
 enum class PixelFormat : uint32_t
@@ -209,6 +219,8 @@ struct V4L2CamData
     uint8_t     reopenDescriptorsCount{};
     uint8_t     reinitializationCount{};
     
+    USBID       storedUSBID{};
+    
     
     //                           //
     // settings domain knowledge //
@@ -360,6 +372,8 @@ public:
     bool          resetDevice () noexcept; // for realizing ErrorAction::ResetDevice
     void powerCyclingConducted() noexcept; // after the deed was done by higher-ups,
                                            // to adjust inner state
+    inline
+    USBID produceUSBID() noexcept { return storedUSBID; }
     
     
     inline // for when you got false for requestBufferQueue

@@ -1296,9 +1296,9 @@ bool V4L2Cam::resetDevice() noexcept
         return false;
     }
     
-    auto usbKernelName    = USBKernelName;
-    auto usbBusNumber     = USBBusNumber;
-    auto usbDeviceAddress = USBDeviceAddress;
+    storedUSBID.kernelName    = USBKernelName;
+    storedUSBID.busNumber     = USBBusNumber;
+    storedUSBID.deviceAddress = USBDeviceAddress;
     
     tryAndStopStreaming();
     uninitialize(true);
@@ -1319,7 +1319,7 @@ RESET_DEVICE_ESCALATE_MEASURES:
         lastResetMeasure = ResetMeasure::USB_IFACE_REBIND;
         reinitInterval   = chrono::milliseconds{ 200};
         reinitTimeout    = chrono::milliseconds{2000};
-        success          = rebindUSBDevice(usbKernelName);
+        success          = rebindUSBDevice(storedUSBID.kernelName);
     }
     if (    !success
          &&  lastResetMeasure == ResetMeasure::USB_IFACE_REBIND
@@ -1331,8 +1331,8 @@ RESET_DEVICE_ESCALATE_MEASURES:
         lastResetMeasure = ResetMeasure::USB_DEVFS_RESET;
         reinitInterval   = chrono::milliseconds{ 400};
         reinitTimeout    = chrono::milliseconds{5000};
-        success          = resetUSBDevice( usbBusNumber
-                                         , usbDeviceAddress
+        success          = resetUSBDevice( storedUSBID.busNumber
+                                         , storedUSBID.deviceAddress
                                          );
     }
     if (    !success
@@ -1345,8 +1345,8 @@ RESET_DEVICE_ESCALATE_MEASURES:
         lastResetMeasure = ResetMeasure::USB_PORT_RESET;
         reinitInterval   = chrono::milliseconds{ 400};
         reinitTimeout    = chrono::milliseconds{5000};
-        success          = resetAtUSBHubPort( usbBusNumber
-                                            , usbDeviceAddress
+        success          = resetAtUSBHubPort( storedUSBID.busNumber
+                                            , storedUSBID.deviceAddress
                                             , false
                                             );
     }
@@ -1362,8 +1362,8 @@ RESET_DEVICE_ESCALATE_MEASURES:
             lastResetMeasure = ResetMeasure::USB_PORT_POWER_CYCLE;
             reinitInterval   = chrono::milliseconds{ 500};
             reinitTimeout    = chrono::milliseconds{8000};
-            success          = resetAtUSBHubPort( usbBusNumber
-                                                , usbDeviceAddress
+            success          = resetAtUSBHubPort( storedUSBID.busNumber
+                                                , storedUSBID.deviceAddress
                                                 , true
                                                 );
         }
