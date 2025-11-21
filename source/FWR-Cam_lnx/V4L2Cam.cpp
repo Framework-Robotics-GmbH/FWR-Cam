@@ -71,17 +71,17 @@ using namespace magic_enum::bitwise_operators;
 namespace fs = std::filesystem;
 
 
-constexpr std::string_view to_string_view(ErrorAction ea) noexcept
+std::string_view to_string_view(ErrorAction ea) noexcept
 {
     return enum_name(ea);
 }
 
-constexpr std::string_view to_string_view(PixelFormat pf) noexcept
+std::string_view to_string_view(PixelFormat pf) noexcept
 {
     return enum_name(pf);
 }
 
-constexpr uint32_t to_integer(PixelFormat pf) noexcept
+uint32_t to_integer(PixelFormat pf) noexcept
 {
     return enum_integer(pf);
 }
@@ -174,17 +174,16 @@ bool V4L2Cam::goIntoInitializedState() noexcept
     
     [[unlikely]]
     
-    if (     (    state == State::DEQUEUEING
-               || state == State::STREAMING
-             )
-         && !tryAndStopStreaming(false)
-       ) [[unlikely]]
-    {
-        clog << "V4L2Cam::goIntoInitializedState: cannot stop streaming!"
-             << endl;
-        
-        return false;
-    }
+    if (    state == State::DEQUEUEING
+         || state == State::STREAMING
+       )
+        if ( !tryAndStopStreaming(false) ) [[unlikely]]
+        {
+            clog << "V4L2Cam::goIntoInitializedState: cannot stop streaming!"
+                 << endl;
+            
+            return false;
+        }
     
     if ( state == State::BUFFER_QUEUE_PREPPED )
     {
@@ -243,6 +242,11 @@ bool V4L2Cam::locateDeviceNodeAndInitialize()
     
     string_view const&  vendorID = _produceVendorID ();
     string_view const& productID = _produceProductID();
+    
+    clog << "V4L2Cam::locateDeviceNodeAndInitialize: looking for "
+            "vID: "   << vendorID << ", pID: " << productID <<
+            ", sNo: " << serialNo << "..."
+         << endl;
     
     bool   product_found{false};
     bool    serial_found{false};
@@ -332,6 +336,9 @@ bool V4L2Cam::locateDeviceNodeAndInitialize()
         }
         
         serial_found = true;
+        errorAction  = ErrorAction::ResetDevice;
+        // ^--- clear, when we successfully initialized below. otherwise the
+        //      found device does need resetting
         
         char const* dev_path = udev_device_get_devnode(dev);
         
@@ -393,46 +400,47 @@ bool V4L2Cam::locateDeviceNodeAndInitialize()
         
         streaming_found = true;
         
+        v4l2Path = dev_path;
+        
+        const char *kernel_name = udev_device_get_sysname(pdev);
+        if ( kernel_name ) USBKernelName = kernel_name;
+        else               USBKernelName.clear();
+        
+        const char *busnum = udev_device_get_sysattr_value(pdev, "busnum");
+        if ( busnum ) USBBusNumber = busnum;
+        else          USBBusNumber.clear();
+        
+        const char *devnum = udev_device_get_sysattr_value(pdev, "devnum");
+        if ( devnum ) USBDeviceAddress = devnum;
+        else          USBDeviceAddress.clear();
+        
+        // resetCrop(fd);
+        
+        v4l2FD = make_shared<FD_t>(move(fd));
+        
+        clog << "V4L2Cam::locateDeviceNodeAndInitialize: found:\n"
+                "\tv4l2Path\t: "         << v4l2Path         << "\n"
+                "\tUSBKernelName\t: "    << USBKernelName    << "\n"
+                "\tUSBBusNumber\t: "     << USBBusNumber     << "\n"
+                "\tUSBDeviceAddress\t: " << USBDeviceAddress
+             << endl;
+        
+        if ( state == State::UNINITIALIZED )
+        {
+            determineSettingDomains(*v4l2FD);
+            determineMaxBufferSizeNeeded(*v4l2FD);
+            
+            initializeSettings();
+            
+            state = State::DEVICE_KNOWN;
+        }
+        else /* state == State::DEVICE_KNOWN */
+            reapplySettings();
+        
         if ( _locateDeviceNodeAndInitialize(uDev, pdev) )
         {
-            v4l2Path = dev_path;
-            
-            const char *kernel_name = udev_device_get_sysname(pdev);
-            if ( kernel_name ) USBKernelName = kernel_name;
-            else               USBKernelName.clear();
-            
-            const char *busnum = udev_device_get_sysattr_value(pdev, "busnum");
-            if ( busnum ) USBBusNumber = busnum;
-            else          USBBusNumber.clear();
-            
-            const char *devnum = udev_device_get_sysattr_value(pdev, "devnum");
-            if ( devnum ) USBDeviceAddress = devnum;
-            else          USBDeviceAddress.clear();
-            
-            // resetCrop(fd);
-            
-            v4l2FD = make_shared<FD_t>(move(fd));
-            
-            clog << "V4L2Cam::locateDeviceNodeAndInitialize: found:\n"
-                    "\tv4l2Path\t: "         << v4l2Path         << "\n"
-                    "\tUSBKernelName\t: "    << USBKernelName    << "\n"
-                    "\tUSBBusNumber\t: "     << USBBusNumber     << "\n"
-                    "\tUSBDeviceAddress\t: " << USBDeviceAddress
-                 << endl;
-            
-            if ( state == State::UNINITIALIZED )
-            {
-                determineSettingDomains(*v4l2FD);
-                determineMaxBufferSizeNeeded(*v4l2FD);
-                
-                initializeSettings();
-                
-                state = State::DEVICE_KNOWN;
-            }
-            else /* state == State::DEVICE_KNOWN */
-                reapplySettings();
-            
-            state = State::INITIALIZED;
+            errorAction = ErrorAction::None;
+            state       = State::INITIALIZED;
         }
         
         break;
@@ -1453,7 +1461,8 @@ RESET_DEVICE_ESCALATE_MEASURES:
     }
     
     
-    return success;
+    return    lastResetMeasure != ResetMeasure::USB_PORT_POWER_CYCLE_REQUESTED
+           && success;
 }
 
 void V4L2Cam::powerCyclingConducted() noexcept

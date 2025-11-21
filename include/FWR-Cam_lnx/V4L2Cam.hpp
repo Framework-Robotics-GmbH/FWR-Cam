@@ -50,7 +50,7 @@ enum class ErrorAction : uint8_t { None
                                  , ForgetDevice
                                  };
 
-constexpr std::string_view to_string_view(ErrorAction ea) noexcept;
+std::string_view to_string_view(ErrorAction ea) noexcept;
 
 // to store it whithin resetDevice before uninitialize(), in case we don't manage
 // to reinitialize, so user code can still retrieve it
@@ -82,8 +82,8 @@ enum class PixelFormat : uint32_t
     YVU420  = ('Y' | ('V' << 8) | ('1' << 16) | ('2' << 24))  // 'YV12'
 };
 
-constexpr std::string_view to_string_view(PixelFormat pf) noexcept;
-constexpr uint32_t         to_integer    (PixelFormat pf) noexcept;
+std::string_view to_string_view(PixelFormat pf) noexcept;
+uint32_t         to_integer    (PixelFormat pf) noexcept;
 
 
 enum class PowerLineFrequency : uint8_t
@@ -380,25 +380,6 @@ public:
     size_t produceActualQueueSize() const noexcept {return bufferCount; }
     
     ErrorAction produceErrorAction() const { return errorAction; }
-    
-    // bool helper_init_cam( const char *devname
-    //                     , uint32_t width
-    //                     , uint32_t height
-    //                     , uint32_t format
-    //                     );
-    // 
-    // bool helper_deinit_cam();
-    // 
-    // bool helper_change_cam_res( uint32_t width
-    //                           , uint32_t height
-    //                           , uint32_t format
-    //                           );
-    // 
-    // bool helper_get_cam_frame( unsigned char** pointer_to_cam_data
-    //                          , int32_t* size
-    //                          );
-    // 
-    // bool helper_release_cam_frame();
     
     
 /**
