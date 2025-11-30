@@ -949,7 +949,7 @@ bool V4L2Cam::fillBuffer(v4l2_buffer& buf) noexcept
         }
         else if ( ret == 0 ) [[unlikely]]
         {
-            update( errorAction, ErrorAction::ResetDevice);
+            update(errorAction, ErrorAction::ResetDevice);
             state = State::STREAMING;
             clog << "V4L2Cam::fillBuffer: poll timed out. marking for need to "
                     "reset cam device!"
@@ -1003,8 +1003,8 @@ bool V4L2Cam::fillBuffer(v4l2_buffer& buf) noexcept
             return false;
         }
         
-        // we've got a frame, so the last reset measure seems to have been fruitful
-        // (though, most of the times it'll be set to NONE anyways)
+        // we've got a frame, so the last reset measure - if any taken at all -
+        // seems to have been fruitful
         lastResetMeasure = ResetMeasure::NONE;
         
         break;
@@ -1139,7 +1139,7 @@ bool V4L2Cam::stopStreaming() noexcept
         return false;
     }
     
-    while ( xioctl(*fd_ptr, VIDIOC_DQBUF, &buf) )
+    while ( xioctl(*fd_ptr, VIDIOC_DQBUF, &buf, XIOCTL_FLAGS::EXPECT_EINVAL) )
     {
         if ( buf.index >= bufferCount ) [[unlikely]]
             clog << "V4L2Cam::stopStreaming: retrieved buffer has out-of-bounds "
@@ -1764,7 +1764,7 @@ XIOCTL_WRONG_USAGE:
     
     if ( r == -1 )
         clog << "V4L2Cam::xioctl: error occured. given request: "
-             << to_string(request)
+             << to_string(static_cast<unsigned long>(request))
              << endl;
     
     errno = errNo;
