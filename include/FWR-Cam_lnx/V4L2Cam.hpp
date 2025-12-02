@@ -351,7 +351,7 @@ public:
     bool queueBuffer(v4l2_buffer&) noexcept; // you're expected to have set the
                                              // index correctly, too
     
-    void reportSetup(std::ostream& out) noexcept;
+    void logSetup(std::ostream& out) noexcept;
     
     bool startStreaming() noexcept;
     bool    isStreaming() noexcept { return    state == State::STREAMING
@@ -423,7 +423,7 @@ private:
                                                , udev_device* parentDev
                                                ) = 0;
     
-    virtual void _reportSetup(std::ostream& out) noexcept = 0;
+    virtual void _logSetup(std::ostream& out) noexcept = 0;
     
     // only to be used by locateDeviceNodeAndInitialize()
     void initializeSettings();

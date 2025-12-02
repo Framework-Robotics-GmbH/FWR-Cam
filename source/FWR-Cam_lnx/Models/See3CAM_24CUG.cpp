@@ -246,31 +246,31 @@ void See3CAM_24CUG::reapplySettings() noexcept
 }
 
 
-void See3CAM_24CUG::_reportSetup(ostream& out) noexcept
+void See3CAM_24CUG::_logSetup(ostream& out) noexcept
 {
-    out << "\n  stream mode\t: ";
+    out << "\n    stream mode   : ";
     
     if ( !fetchStreamMode() ) [[unlikely]]
-        out << "could not get from device";
+        out << "couldn't fetch stream mode from device";
     else
     {
         uint8_t sm{};
         bool    _{};
         
         if ( !giveStreamMode(sm, _) ) [[unlikely]]
-            out << "have no valid value to provide";
-        else
-            out << to_string(sm);
+            out << "no valid value!";
+        else if ( static_cast<StreamMode>(sm) == StreamMode::MASTER )
+            out << "MASTER";
+        else if ( static_cast<StreamMode>(sm) == StreamMode::TRIGGER )
+            out << "TRIGGER";
     }
     
-    
-    
-    out << "\n  exposure compensation\t: ";
+    out << "\n    exposure comp.: ";
     uint32_t expComp{};
     if ( !fetchExposureCompensation() ) [[unlikely]]
-        out << "couldn't get value from device";
+        out << "couldn't fetch exposure compensation value from device";
     else if ( !giveExposureCompensation(expComp) ) [[unlikely]]
-        out << "have no valid value to provide";
+        out << "no valid value!";
     else
         out << to_string(expComp);
 }

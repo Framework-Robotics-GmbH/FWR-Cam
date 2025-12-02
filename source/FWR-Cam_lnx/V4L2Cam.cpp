@@ -244,8 +244,9 @@ bool V4L2Cam::locateDeviceNodeAndInitialize()
     string_view const& productID = _produceProductID();
     
     clog << "V4L2Cam::locateDeviceNodeAndInitialize: looking for "
-            "vID: "   << vendorID << ", pID: " << productID <<
-            ", sNo: " << serialNo << "..."
+         << "\n    vID: " << vendorID
+         << "\n    pID: " << productID
+         << "\n    sNo: " << serialNo
          << endl;
     
     bool   product_found{false};
@@ -291,9 +292,12 @@ bool V4L2Cam::locateDeviceNodeAndInitialize()
         if ( !path ) [[unlikely]]
             continue;
         
-        clog << "V4L2Cam::locateDeviceNodeAndInitialize: looking at path "
-             << path
-             << endl;
+        string_view svPath(path);
+        clog << "V4L2Cam::locateDeviceNodeAndInitialize: looking at"
+                "\n    path: " << svPath.substr(0, 70);
+        for ( size_t p{70}; p < svPath.size(); p += 70 )
+            clog << "\n          " << svPath.substr(p, 70);
+        clog << endl;
         
         dev = udev_device_new_from_syspath(uDev, path);
         
@@ -345,8 +349,8 @@ bool V4L2Cam::locateDeviceNodeAndInitialize()
         if ( !dev_path )
             continue;
         
-        clog << "V4L2Cam::locateDeviceNodeAndInitialize: looking at device path "
-             << dev_path
+        clog << "V4L2Cam::locateDeviceNodeAndInitialize: looking at"
+                "\n    device path: " << dev_path
              << endl;
         
         FD_t fd{xopen(dev_path, O_RDWR | O_NONBLOCK)};
@@ -418,11 +422,22 @@ bool V4L2Cam::locateDeviceNodeAndInitialize()
         
         v4l2FD = make_shared<FD_t>(move(fd));
         
-        clog << "V4L2Cam::locateDeviceNodeAndInitialize: found:\n"
-                "\tv4l2Path\t: "         << v4l2Path         << "\n"
-                "\tUSBKernelName\t: "    << USBKernelName    << "\n"
-                "\tUSBBusNumber\t: "     << USBBusNumber     << "\n"
-                "\tUSBDeviceAddress\t: " << USBDeviceAddress
+        auto manufacturer = udev_device_get_sysattr_value(pdev, "manufacturer");
+        auto product_name = udev_device_get_sysattr_value(pdev, "product");
+        
+        clog << "V4L2Cam::locateDeviceNodeAndInitialize: found ..."
+             << "\n    v4l2Path        : " << v4l2Path
+             << "\n    USBKernelName   : " << USBKernelName
+             << "\n    USBBusNumber    : " << USBBusNumber
+             << "\n    USBDeviceAddress: " << USBDeviceAddress
+             << "\n    manufacturer    : " << (   manufacturer != nullptr
+                                                ? manufacturer
+                                                : "<not in descriptor>"
+                                              )
+             << "\n    product name    : " << (   product_name != nullptr
+                                                ? product_name
+                                                : "<not in descriptor>"
+                                              )
              << endl;
         
         if ( state == State::UNINITIALIZED )
@@ -748,64 +763,82 @@ bool V4L2Cam::queueBuffer(v4l2_buffer& buf) noexcept
 }
 
 
-void V4L2Cam::reportSetup(ostream& out) noexcept
+void V4L2Cam::logSetup(ostream& out) noexcept
 {
     if ( state != State::BUFFER_QUEUE_PREPPED ) [[unlikely]]
     {
-        clog << "V4L2Cam::reportSetup: not in the correct state "
-                "(BUFFER_QUEUE_PREPPED) to report setup!"
-             << endl;
+        out << "    not in the correct state (BUFFER_QUEUE_PREPPED) for setup "
+               " report!"
+            << endl;
         
         return;
     }
     
-    out <<  "Cam setup report for serial No. \"" << serialNo << "\"";
+    out << "    serial No.    : " << serialNo;
     
-    auto fmt_opt = giveV4L2Format();
+    bool apiKnown;
+    
+    out << "\n    buffer API    : ";
+    switch ( apiToUse )
+    {
+        case APIToUse::UNKNOWN: out << "UNKNOWN"; apiKnown = false; break;
+        case APIToUse::MULTI  : out << "MULTI"  ; apiKnown = true ; break;
+        case APIToUse::SINGLE : out << "SINGLE" ; apiKnown = true ; break;
+        default               : out << "???"    ; apiKnown = false;
+    }
+    
+    auto fmt_opt = apiKnown
+                 ? giveV4L2Format()
+                 : decltype(giveV4L2Format()){};
     
     if ( fmt_opt ) [[  likely]]
     {
+        uint32_t width{}, height{}, pxFmt{}, field{};
+        
         if ( apiToUse == APIToUse::MULTI )
         {
-            auto& fmt = (*fmt_opt).fmt.pix_mp;
-            out << "\n  width\t: " << to_string(fmt.width)
-                << "\n  heigth\t: " << to_string(fmt.height)
-                << "\n  pixel format\t:"
-                << '\'' 
-                << static_cast<char>((fmt.pixelformat >>  0) & 0xFF)
-                << static_cast<char>((fmt.pixelformat >>  8) & 0xFF)
-                << static_cast<char>((fmt.pixelformat >> 16) & 0xFF)
-                << static_cast<char>((fmt.pixelformat >> 24) & 0xFF)
-                << '\''
-                << "\n  field order\t: " << to_string(fmt.field);
+            auto& fmt   = (*fmt_opt).fmt.pix_mp;
+                  width = fmt.width;       height = fmt.height;
+                  pxFmt = fmt.pixelformat; field  = fmt.field;
         }
         else // APIToUse::SINGLE
         {
-            auto& fmt = (*fmt_opt).fmt.pix;
-            out << "\n  width\t: " << to_string(fmt.width)
-                << "\n  heigth\t: " << to_string(fmt.height)
-                << "\n  pixel format\t:"
-                << '\'' 
-                << static_cast<char>((fmt.pixelformat >>  0) & 0xFF)
-                << static_cast<char>((fmt.pixelformat >>  8) & 0xFF)
-                << static_cast<char>((fmt.pixelformat >> 16) & 0xFF)
-                << static_cast<char>((fmt.pixelformat >> 24) & 0xFF)
-                << '\''
-                << "\n  field order\t: " << to_string(fmt.field);
+            auto& fmt   = (*fmt_opt).fmt.pix;
+                  width = fmt.width;       height = fmt.height;
+                  pxFmt = fmt.pixelformat; field  = fmt.field;
+        }
+        
+        out << "\n    width         : " << to_string(width)
+            << "\n    heigth        : " << to_string(height)
+            << "\n    pixel format  : "
+            <<      '\'' 
+            <<      static_cast<char>((pxFmt >>  0) & 0xFF)
+            <<      static_cast<char>((pxFmt >>  8) & 0xFF)
+            <<      static_cast<char>((pxFmt >> 16) & 0xFF)
+            <<      static_cast<char>((pxFmt >> 24) & 0xFF)
+            <<      '\''
+            << "\n    field order   : ";
+        
+        switch( field )
+        {
+            case V4L2_FIELD_ANY          : out << "V4L2_FIELD_ANY <illegal!>"; break;
+            case V4L2_FIELD_NONE         : out << "V4L2_FIELD_NONE"          ; break;
+            case V4L2_FIELD_TOP          : out << "V4L2_FIELD_TOP"           ; break;
+            case V4L2_FIELD_BOTTOM       : out << "V4L2_FIELD_BOTTOM"        ; break;
+            case V4L2_FIELD_INTERLACED   : out << "V4L2_FIELD_INTERLACED"    ; break;
+            case V4L2_FIELD_SEQ_TB       : out << "V4L2_FIELD_SEQ_TB"        ; break;
+            case V4L2_FIELD_SEQ_BT       : out << "V4L2_FIELD_SEQ_BT"        ; break;
+            case V4L2_FIELD_ALTERNATE    : out << "V4L2_FIELD_ALTERNATE"     ; break;
+            case V4L2_FIELD_INTERLACED_TB: out << "V4L2_FIELD_INTERLACED_TB" ; break;
+            case V4L2_FIELD_INTERLACED_BT: out << "V4L2_FIELD_INTERLACED_BT" ; break;
+            
+            default: clog << "<not recognized!>";
         }
     }
-    else // no fmt
-        out << "\n  could not get v4l2_format from device!";
-        
-    out <<  "\n  buffer API to use\t: ";
-    switch ( apiToUse )
-    {
-        case APIToUse::UNKNOWN: out << "UNKNOWN"; break;
-        case APIToUse::MULTI  : out << "MULTI"  ; break;
-        case APIToUse::SINGLE : out << "SINGLE" ; break;
-        default               : out << "???"    ;
-    }
-    out <<  "\n  memory type\t: ";
+    else if ( apiKnown ) // , but no fmt
+        out << "\n    could not get v4l2_format from device!";
+    
+    out << "\n    memory type   : ";
     switch ( memoryType )
     {
         case MemoryType::UNKNOWN: out << "UNKNOWN"; break;
@@ -814,16 +847,16 @@ void V4L2Cam::reportSetup(ostream& out) noexcept
         case MemoryType::DMABUF : out << "DMABUF" ; break;
         default                 : out << "???"    ;
     }
-    out <<  "\n  buffers queued\t: " << to_string(buffersQueued.count());
+    out << "\n    buffers queued: " << to_string(buffersQueued.count());
      
-    out << "\n  framerate\t: ";
+    out << "\n    framerate     : ";
     auto fps_opt = _produceFramerate();
     if ( !fps_opt ) [[unlikely]]
         out << "can't tell";
     else
         out << to_string(*fps_opt);
     
-    out << "\n  exposure\t: ";
+    out << "\n    exposure      : ";
     int32_t exp{};
     if ( !fetchExposure() ) [[unlikely]]
         out << "couldn't get value from device";
@@ -833,7 +866,7 @@ void V4L2Cam::reportSetup(ostream& out) noexcept
         out << to_string(exp);
     
     
-    _reportSetup(out);
+    _logSetup(out);
 }
 
 

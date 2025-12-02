@@ -95,7 +95,7 @@ private:
     void initializeSettings() noexcept;
     void    reapplySettings() noexcept;
     
-    virtual void _reportSetup(std::ostream& out) noexcept override;
+    virtual void _logSetup(std::ostream& out) noexcept override;
     
     std::shared_ptr<FD_t> produceHIDFD();
     bool                     openHIDFD();
