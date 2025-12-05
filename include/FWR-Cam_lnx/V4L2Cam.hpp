@@ -125,7 +125,7 @@ struct V4L2CamData
     enum class ResetMeasure   : uint8_t { NONE
                                         , USB_IFACE_REBIND
                                         , USB_DEVFS_RESET
-                                        , USB_PORT_RESET
+                                        // , USB_PORT_RESET
                                         , USB_PORT_POWER_CYCLE_REQUESTED
                                         , USB_PORT_POWER_CYCLE
                                         };
@@ -455,7 +455,7 @@ private:
                           , std::string const& usbDeviceAddress  ) noexcept;
     bool resetAtUSBHubPort( std::string const& usbBusNumber
                           , std::string const& usbDeviceAddress
-                          , bool               powerCycle = false) noexcept;
+                          /*, bool               powerCycle = false*/) noexcept;
     bool produceHubHandleAndPortNumber( std::string const&      usbBusNumber
                                       , std::string const&      usbDeviceAddress
                                       , libusb_context *        ctx

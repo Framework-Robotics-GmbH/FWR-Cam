@@ -166,6 +166,12 @@ bool See3CAM_24CUG::_locateDeviceNodeAndInitialize( udev       * uDev
         }
         
         FD_t fd{xopen(dev_path, O_RDWR | O_NONBLOCK)};
+//         static int32_t thisRunsFD = -1;
+//         
+//         FD_t fd;
+//         if ( thisRunsFD == -1 ) fd = thisRunsFD = xopen(dev_path, O_RDWR | O_NONBLOCK);
+//         else                    fd = thisRunsFD;
+
         if ( fd < 0 ) {
             clog << "See3CAM_24CUG::_locateDeviceNodeAndInitialize: Could not "
                     "open hidraw device path"
@@ -174,6 +180,10 @@ bool See3CAM_24CUG::_locateDeviceNodeAndInitialize( udev       * uDev
             udev_device_unref(dev);
             continue;
         }
+        else
+            clog << "See3CAM_24CUG::_locateDeviceNodeAndInitialize: hid fd: "
+                 << to_string((int32_t)fd)
+                 << endl;
         
         hidPath = dev_path;
         
@@ -591,6 +601,7 @@ bool See3CAM_24CUG::drainHidInput(size_t reportLen)
     while ( true )
     {
         ssize_t n = read(*fd_ptr, buf.data(), buf.size());
+        int errNo = errno;
         
         if ( n > 0 )
             // drained one report, loop again
@@ -600,12 +611,15 @@ bool See3CAM_24CUG::drainHidInput(size_t reportLen)
             // device disappeared
             return false;
         
-        if ( errno == EAGAIN || errno == EWOULDBLOCK )
+        if ( errNo == EAGAIN || errNo == EWOULDBLOCK )
             // nothing left to read -> drained
             break;
         
-        if ( errno == EINTR )
+        if ( errNo == EINTR )
             continue;
+        
+        clog << "See3CAM_24CUG::drainHidInput: error: " << strerror(errNo)
+             << endl;
         
         // hard error
         return false;

@@ -360,6 +360,12 @@ bool V4L2Cam::locateDeviceNodeAndInitialize()
         
         FD_t fd{xopen(dev_path, O_RDWR | O_NONBLOCK)};
         
+//         static int32_t thisRunsFD = -1;
+//         
+//         FD_t fd;
+//         if ( thisRunsFD == -1 ) fd = thisRunsFD = xopen(dev_path, O_RDWR | O_NONBLOCK);
+//         else                    fd = thisRunsFD;
+        
         if ( !fd )
         {
             int const errNo = errno;
@@ -423,6 +429,7 @@ bool V4L2Cam::locateDeviceNodeAndInitialize()
         auto product_name = udev_device_get_sysattr_value(pdev, "product");
         
         clog << "V4L2Cam::locateDeviceNodeAndInitialize: found ..."
+             << "\n    fd              : " << to_string((int32_t)*v4l2FD)
              << "\n    v4l2Path        : " << v4l2Path
              << "\n    USBKernelName   : " << USBKernelName
              << "\n    USBBusNumber    : " << USBBusNumber
@@ -1170,6 +1177,9 @@ bool V4L2Cam::stopStreaming() noexcept
         return false;
     }
     
+    clog << "V4L2Cam::stopStreaming: successfully set VIDIOC_STREAMOFF"
+         << endl;
+    
     while ( xioctl( *fd_ptr
                   , VIDIOC_DQBUF
                   , "VIDIOC_DQBUF"
@@ -1388,23 +1398,24 @@ RESET_DEVICE_ESCALATE_MEASURES:
                                          , storedUSBID.deviceAddress
                                          );
     }
+//     if (    !didReset
+//          &&  lastResetMeasure == ResetMeasure::USB_DEVFS_RESET
+//        )
+//     {
+//         clog << "V4L2Cam::resetDevice: trying to reset USB device (itself) ..."
+//              << endl;
+//         
+//         lastResetMeasure = ResetMeasure::USB_PORT_RESET;
+//         reinitInterval   = chrono::milliseconds{ 400};
+//         reinitTimeout    = chrono::milliseconds{5000};
+//         didReset         = resetAtUSBHubPort( storedUSBID.busNumber
+//                                             , storedUSBID.deviceAddress
+//                                             , false
+//                                             );
+//     }
     if (    !didReset
+         // &&  lastResetMeasure == ResetMeasure::USB_PORT_RESET
          &&  lastResetMeasure == ResetMeasure::USB_DEVFS_RESET
-       )
-    {
-        clog << "V4L2Cam::resetDevice: trying to reset USB device (itself) ..."
-             << endl;
-        
-        lastResetMeasure = ResetMeasure::USB_PORT_RESET;
-        reinitInterval   = chrono::milliseconds{ 400};
-        reinitTimeout    = chrono::milliseconds{5000};
-        didReset         = resetAtUSBHubPort( storedUSBID.busNumber
-                                            , storedUSBID.deviceAddress
-                                            , false
-                                            );
-    }
-    if (    !didReset
-         &&  lastResetMeasure == ResetMeasure::USB_PORT_RESET
        )
     {
         if ( hubCanPowerCyclePerPort )
@@ -1418,7 +1429,7 @@ RESET_DEVICE_ESCALATE_MEASURES:
             // TODO *untested*
             didReset         = resetAtUSBHubPort( storedUSBID.busNumber
                                                 , storedUSBID.deviceAddress
-                                                , true
+                                                // , true
                                                 );
         }
         else // can only request higher-ups to do the power cycling
@@ -2590,7 +2601,7 @@ bool V4L2Cam::resetUSBDevice( string const& usbBusNumber
 
 bool V4L2Cam::resetAtUSBHubPort( string const& usbBusNumber
                                , string const& usbDeviceAddress
-                               , bool          powerCycle
+                               // , bool          powerCycle
                                ) noexcept
 {
     libusb_context*          ctx        = nullptr;
@@ -2634,7 +2645,7 @@ bool V4L2Cam::resetAtUSBHubPort( string const& usbBusNumber
         goto RESET_AT_USB_PORT_END;
     }
     
-    if ( powerCycle )
+    // if ( powerCycle )
     {
         res = libusb_control_transfer( hub_handle
                                      , REQTYPE_PORT_OUT
@@ -2701,31 +2712,31 @@ bool V4L2Cam::resetAtUSBHubPort( string const& usbBusNumber
         // Give the link time to debounce and enumerate a bit.
         this_thread::sleep_for(chrono::milliseconds(1200));
     }
-    else /* just reset */
-    {
-        res = libusb_control_transfer( hub_handle
-                                     , REQTYPE_PORT_OUT
-                                     , LIBUSB_REQUEST_SET_FEATURE
-                                     , PORT_RESET
-                                     , port
-                                     , NULL
-                                     , 0
-                                     , 1000
-                                     );
-        success &= res >= 0;
-        
-        if ( !success ) [[unlikely]]
-        {
-            clog << "V4L2Cam::resetAtUSBPort: Failed to port reset on the device: "
-                 << libusb_error_name(res)
-                 << endl;
-
-            goto RESET_AT_USB_PORT_END;
-        }
-        
-        // Give the link time to debounce and enumerate a bit.
-        this_thread::sleep_for(chrono::milliseconds(400));
-    }
+//     else /* just reset */
+//     {
+//         res = libusb_control_transfer( hub_handle
+//                                      , REQTYPE_PORT_OUT
+//                                      , LIBUSB_REQUEST_SET_FEATURE
+//                                      , PORT_RESET
+//                                      , port
+//                                      , NULL
+//                                      , 0
+//                                      , 1000
+//                                      );
+//         success &= res >= 0;
+//         
+//         if ( !success ) [[unlikely]]
+//         {
+//             clog << "V4L2Cam::resetAtUSBPort: Failed to port reset on the device: "
+//                  << libusb_error_name(res)
+//                  << endl;
+// 
+//             goto RESET_AT_USB_PORT_END;
+//         }
+//         
+//         // Give the link time to debounce and enumerate a bit.
+//         this_thread::sleep_for(chrono::milliseconds(400));
+//     }
     
     
 RESET_AT_USB_PORT_END:
