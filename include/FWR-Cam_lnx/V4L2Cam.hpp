@@ -45,8 +45,8 @@ enum class ErrorAction : uint8_t { None
                                  , ResetDevice
                                  , USBPowerCycle // when higher-ups must do it
                                  , FreeMemory
-                                 , CheckPermissions
                                  , CheckLogic
+                                 , CheckPermissions
                                  , ForgetDevice
                                  };
 
@@ -111,9 +111,9 @@ struct V4L2CamData
                                         };
     
     
-    enum class SettingSource  : uint8_t { UNKNOWN
-                                        , GIVEN
-                                        , FETCHED
+    enum class SettingSource  : uint8_t { NONE
+                                        , USER
+                                        , DEVICE
                                         };
     enum class State          : uint8_t { UNINITIALIZED
                                         , DEVICE_KNOWN
@@ -406,9 +406,10 @@ protected:
                                    ) noexcept;
     
 
-    bool xioctl( FD_t const&  fd
-               , uint64_t     request
-               , void*        arg
+    bool xioctl( FD_t const&            fd
+               , uint64_t               request
+               , std::string_view const requestStr
+               , void*                  arg
                , XIOCTL_FLAGS callFlags = XIOCTL_FLAGS::NONE
                );
     static int32_t xopen( char    const* pathname
@@ -433,8 +434,14 @@ private:
     bool isSetMemoryTypeSupported() noexcept;
     bool determineMaxBufferSizeNeeded(FD_t const&);
     void determineSettingDomains(FD_t const& fd);
-    void queryControlDomain(FD_t const& fd, uint32_t controlID, bool& domainKnown,
-                            int32_t& min, int32_t& max, int32_t& step);
+    void queryControlDomain( FD_t             const& fd
+                           , uint32_t                controlID
+                           , std::string_view const  cidStr
+                           , bool                  & domainKnown
+                           , int32_t               & min
+                           , int32_t               & max
+                           , int32_t               & step
+                           );
     
     std::shared_ptr<FD_t> produceV4L2FD();
     bool                     openV4L2FD(); // locateDevice...() has that effect, too
@@ -467,12 +474,14 @@ private:
     
     // settings helpers //
     
-    bool fetch_control_value( std::shared_ptr<FD_t> fd_ptr
-                            , uint32_t              id
-                            , int32_t&              value
+    bool fetch_control_value( std::shared_ptr<FD_t>  fd_ptr
+                            , uint32_t               id
+                            , std::string_view const idStr
+                            , int32_t&               value
                             );
     bool apply_control_value( std::shared_ptr<FD_t> fd_ptr
                             , uint32_t              id
+                            , std::string_view const idStr
                             , int32_t const         value
                             );
     

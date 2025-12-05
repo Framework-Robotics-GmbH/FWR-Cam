@@ -122,7 +122,12 @@ void V4L2CamData::FD_t::close_fd()
         result = ::close(value);
         
         if ( result == 0 )
+        {
             value = -1;
+            
+            clog << "V4L2CamData::FD_t::close_fd: fd closed"
+                 << endl;
+        }
         else if ( errno == EINTR )
         {
             if ( attempt < retry_count - 1 )
@@ -368,16 +373,8 @@ bool V4L2Cam::locateDeviceNodeAndInitialize()
         
         v4l2_capability cap{};
         
-        if ( !xioctl(fd, VIDIOC_QUERYCAP, &cap) )
-        {
-            int const errNo = errno;
-            
-            clog << "V4L2Cam::locateDeviceNodeAndInitialize: VIDIOC_QUERYCAP "
-                    "failed! "
-                 << strerror(errNo) << endl;
-            
+        if ( !xioctl(fd, VIDIOC_QUERYCAP, "VIDIOC_QUERYCAP", &cap) )
             continue;
-        }
         
         if ( !(   cap.capabilities
                 & V4L2_CAP_VIDEO_CAPTURE )
@@ -591,7 +588,7 @@ bool V4L2Cam::requestBufferQueue(uint32_t count) noexcept
         req.type   = bufType;
         req.memory = memType;
         
-        if ( !xioctl(*fd_ptr, VIDIOC_REQBUFS, &req) ) [[unlikely]]
+        if ( !xioctl(*fd_ptr, VIDIOC_REQBUFS, "VIDIOC_REQBUFS", &req) ) [[unlikely]]
         {
             int const errNo = errno;
             
@@ -609,7 +606,7 @@ bool V4L2Cam::requestBufferQueue(uint32_t count) noexcept
     req.type   = bufType;
     req.memory = memType;
     
-    if ( !xioctl(*fd_ptr, VIDIOC_REQBUFS, &req) ) [[unlikely]]
+    if ( !xioctl(*fd_ptr, VIDIOC_REQBUFS, "VIDIOC_REQBUFS", &req) ) [[unlikely]]
     {
         int const errNo = errno;
         
@@ -747,7 +744,7 @@ bool V4L2Cam::queueBuffer(v4l2_buffer& buf) noexcept
              << endl;
     
     
-    if ( !xioctl(*fd_ptr, VIDIOC_QBUF, &buf) ) [[unlikely]]
+    if ( !xioctl(*fd_ptr, VIDIOC_QBUF, "VIDIOC_QBUF", &buf) ) [[unlikely]]
     {
         int const errNo = errno;
         
@@ -910,7 +907,7 @@ bool V4L2Cam::startStreaming() noexcept
     }
 
     
-    if ( !xioctl(*fd_ptr, VIDIOC_STREAMON, &bufType) )
+    if ( !xioctl(*fd_ptr, VIDIOC_STREAMON, "VIDIOC_STREAMON", &bufType) )
     {
         int const errNo = errno;
         
@@ -1060,7 +1057,7 @@ bool V4L2Cam::fillBuffer(v4l2_buffer& buf) noexcept
         // return false;
     }
     
-    bool succ = xioctl(*fd_ptr, VIDIOC_DQBUF, &buf);
+    bool succ = xioctl(*fd_ptr, VIDIOC_DQBUF, "VIDIOC_DQBUF", &buf);
     errNo     = errno;
     
     state = State::STREAMING;
@@ -1160,7 +1157,8 @@ bool V4L2Cam::stopStreaming() noexcept
     }
     
     
-    if ( !xioctl(*fd_ptr, VIDIOC_STREAMOFF, &buf.type) ) [[unlikely]]
+    if ( !xioctl(*fd_ptr, VIDIOC_STREAMOFF, "VIDIOC_STREAMOFF", &buf.type) )
+    [[unlikely]]
     {
         int const errNo = errno;
         
@@ -1172,7 +1170,13 @@ bool V4L2Cam::stopStreaming() noexcept
         return false;
     }
     
-    while ( xioctl(*fd_ptr, VIDIOC_DQBUF, &buf, XIOCTL_FLAGS::EXPECT_EINVAL) )
+    while ( xioctl( *fd_ptr
+                  , VIDIOC_DQBUF
+                  , "VIDIOC_DQBUF"
+                  , &buf
+                  , XIOCTL_FLAGS::EXPECT_EINVAL
+                  )
+          )
     {
         if ( buf.index >= bufferCount ) [[unlikely]]
             clog << "V4L2Cam::stopStreaming: retrieved buffer has out-of-bounds "
@@ -1241,7 +1245,7 @@ bool V4L2Cam::releaseBufferQueue() noexcept
     req.type   = bufType;
     req.memory = memType;
     
-    if ( !xioctl(*fd_ptr, VIDIOC_REQBUFS, &req) ) [[unlikely]]
+    if ( !xioctl(*fd_ptr, VIDIOC_REQBUFS, "VIDIOC_REQBUFS", &req) ) [[unlikely]]
     {
         int const errNo = errno;
         
@@ -1309,18 +1313,26 @@ bool V4L2Cam::reinitialize() noexcept
 bool V4L2Cam::resetDevice() noexcept
 {
     if ( state == State::UNINITIALIZED ) [[unlikely]]
-    {
-        clog << "V4L2Cam::resetDevice: not in a correct state (anything but "
-                "UNINITIALIZED) to reset device!"
+        clog << "V4L2Cam::resetDevice: resetting device from UNINITIALIZED state "
+                "will not restore settings, since none known!"
              << endl;
-        
-        return false;
-    }
     
     if ( errorAction != ErrorAction::ResetDevice ) [[unlikely]]
     {
         clog << "V4L2Cam::resetDevice: not marked with ErrorAction::ResetDevice!"
              << endl;
+        
+        return false;
+    }
+    
+    if (    lastResetMeasure == ResetMeasure::USB_PORT_POWER_CYCLE
+         || lastResetMeasure == ResetMeasure::USB_PORT_POWER_CYCLE_REQUESTED
+       ) [[unlikely]]
+    {
+        clog << "V4L2Cam::resetDevice: measures already exhausted!"
+             << endl;
+        
+        errorAction = ErrorAction::ForgetDevice;
         
         return false;
     }
@@ -1346,7 +1358,7 @@ bool V4L2Cam::resetDevice() noexcept
     
 RESET_DEVICE_ESCALATE_MEASURES:
     
-    bool success{false};
+    bool didReset{false}, didReinit{false};
     chrono::milliseconds reinitInterval{};
     chrono::milliseconds reinitTimeout {};
     
@@ -1360,9 +1372,9 @@ RESET_DEVICE_ESCALATE_MEASURES:
         lastResetMeasure = ResetMeasure::USB_IFACE_REBIND;
         reinitInterval   = chrono::milliseconds{ 200};
         reinitTimeout    = chrono::milliseconds{2000};
-        success          = rebindUSBDevice(storedUSBID.kernelName);
+        didReset         = rebindUSBDevice(storedUSBID.kernelName);
     }
-    if (    !success
+    if (    !didReset
          &&  lastResetMeasure == ResetMeasure::USB_IFACE_REBIND
        )
     {
@@ -1372,11 +1384,11 @@ RESET_DEVICE_ESCALATE_MEASURES:
         lastResetMeasure = ResetMeasure::USB_DEVFS_RESET;
         reinitInterval   = chrono::milliseconds{ 400};
         reinitTimeout    = chrono::milliseconds{5000};
-        success          = resetUSBDevice( storedUSBID.busNumber
+        didReset         = resetUSBDevice( storedUSBID.busNumber
                                          , storedUSBID.deviceAddress
                                          );
     }
-    if (    !success
+    if (    !didReset
          &&  lastResetMeasure == ResetMeasure::USB_DEVFS_RESET
        )
     {
@@ -1386,12 +1398,12 @@ RESET_DEVICE_ESCALATE_MEASURES:
         lastResetMeasure = ResetMeasure::USB_PORT_RESET;
         reinitInterval   = chrono::milliseconds{ 400};
         reinitTimeout    = chrono::milliseconds{5000};
-        success          = resetAtUSBHubPort( storedUSBID.busNumber
+        didReset         = resetAtUSBHubPort( storedUSBID.busNumber
                                             , storedUSBID.deviceAddress
                                             , false
                                             );
     }
-    if (    !success
+    if (    !didReset
          &&  lastResetMeasure == ResetMeasure::USB_PORT_RESET
        )
     {
@@ -1403,7 +1415,8 @@ RESET_DEVICE_ESCALATE_MEASURES:
             lastResetMeasure = ResetMeasure::USB_PORT_POWER_CYCLE;
             reinitInterval   = chrono::milliseconds{ 500};
             reinitTimeout    = chrono::milliseconds{8000};
-            success          = resetAtUSBHubPort( storedUSBID.busNumber
+            // TODO *untested*
+            didReset         = resetAtUSBHubPort( storedUSBID.busNumber
                                                 , storedUSBID.deviceAddress
                                                 , true
                                                 );
@@ -1416,86 +1429,91 @@ RESET_DEVICE_ESCALATE_MEASURES:
             
             errorAction      = ErrorAction::USBPowerCycle;
             lastResetMeasure = ResetMeasure::USB_PORT_POWER_CYCLE_REQUESTED;
-            reinitInterval   = chrono::milliseconds{ 100};
-            reinitTimeout    = chrono::milliseconds{1000};
-            success          = true;
         }
     }
-    if (    !success ) [[unlikely]]
-    {
-        clog << "V4L2Cam::resetDevice: ... no success!"
-             << endl;
-        
-        errorAction = ErrorAction::ForgetDevice;
-        
-        return false;
-    }
+    
     
     if ( lastResetMeasure != ResetMeasure::USB_PORT_POWER_CYCLE_REQUESTED )
-        clog << "V4L2Cam::resetDevice: ... successfully"
-             << endl;
-    clog << "V4L2Cam::resetDevice: trying to re-init ..."
-         << endl;
-    
-    
-    success             = false;
-    auto const deadline = chrono::steady_clock::now() + reinitTimeout;
-    
-    do
     {
-        if ( locateDeviceNodeAndInitialize() )
-            success = true;
-        else
-            this_thread::sleep_for(reinitInterval);
-    }
-    while (    !success
-            &&  chrono::steady_clock::now() < deadline
-          );
-          
-    if ( !success )
-    {
-        clog << "V4L2Cam::resetDevice: ... no success!"
-             << endl;
-        
-        if ( lastResetMeasure == ResetMeasure::USB_PORT_POWER_CYCLE )
+        if ( !didReset
+           ) [[unlikely]]
         {
-            clog << "V4L2Cam::resetDevice: reset measures exhausted. marking "
-                    "myself unfixable!"
+            clog << "V4L2Cam::resetDevice: ... but failed!"
                  << endl;
             
             errorAction = ErrorAction::ForgetDevice;
+            
+            return false;
         }
-        else if ( lastResetMeasure == ResetMeasure::USB_PORT_POWER_CYCLE_REQUESTED )
+        
+        clog << "V4L2Cam::resetDevice: ... successfully"
+             << endl;
+        clog << "V4L2Cam::resetDevice: trying to re-init ..."
+             << endl;
+        
+        auto const ea       = errorAction;
+        auto const deadline = chrono::steady_clock::now() + reinitTimeout;
+        
+        do
         {
-            clog << "V4L2Cam::resetDevice: higher-up control should recognize "
-                    "request for a USB power cycle and execute, before trying "
-                    "to make me scream ... uh ... stream again!"
+            if ( locateDeviceNodeAndInitialize() )
+                didReinit = true;
+            else
+                this_thread::sleep_for(reinitInterval);
+        }
+        while (    !didReinit
+                &&  chrono::steady_clock::now() < deadline
+              );
+        
+        // just in case one of the settings in reapplySettings
+        // didn't work out - seen such a thing
+        if ( errorAction != ea )
+        {
+            clog << "V4L2Cam::resetDevice: ... successfully, but some settings "
+                    "re-application seems to have gone wrong. still considering "
+                    "the operation a success."
                  << endl;
+            
+            errorAction = ea;
+        }
+        
+        if ( !didReinit )
+        {
+            clog << "V4L2Cam::resetDevice: ... but failed!"
+                 << endl;
+            
+            if ( lastResetMeasure == ResetMeasure::USB_PORT_POWER_CYCLE )
+            {
+                clog << "V4L2Cam::resetDevice: reset measures exhausted. marking "
+                        "myself unfixable!"
+                     << endl;
+                
+                errorAction = ErrorAction::ForgetDevice;
+            }
+            else
+            {
+                clog << "V4L2Cam::resetDevice: immediately going back to try the "
+                        "next measure in line"
+                     << endl;
+                
+                goto RESET_DEVICE_ESCALATE_MEASURES;
+            }
         }
         else
         {
-            clog << "V4L2Cam::resetDevice: immediately going back to try the "
-                    "next measure in line"
+            clog << "V4L2Cam::resetDevice: ... successfully"
                  << endl;
             
-            goto RESET_DEVICE_ESCALATE_MEASURES;
-        }
-    }
-    else
-    {
-        clog << "V4L2Cam::resetDevice: ... successfully"
-             << endl;
-        
-        if ( lastResetMeasure != ResetMeasure::USB_PORT_POWER_CYCLE_REQUESTED )
-        {
-            errorAction = ErrorAction::None;
-            this_thread::sleep_for(chrono::milliseconds(100)); // grace period
+            if ( lastResetMeasure != ResetMeasure::USB_PORT_POWER_CYCLE_REQUESTED )
+            {
+                errorAction = ErrorAction::None;
+                this_thread::sleep_for(chrono::milliseconds(100)); // grace period
+            }
         }
     }
     
     
-    return    lastResetMeasure != ResetMeasure::USB_PORT_POWER_CYCLE_REQUESTED
-           && success;
+    return didReset && didReinit;
 }
 
 void V4L2Cam::powerCyclingConducted() noexcept
@@ -1503,11 +1521,8 @@ void V4L2Cam::powerCyclingConducted() noexcept
     if (    errorAction      != ErrorAction ::USBPowerCycle
          || lastResetMeasure != ResetMeasure::USB_PORT_POWER_CYCLE_REQUESTED
        ) [[unlikely]]
-    {
-        
-        
         return;
-    }
+    
     
     errorAction      = ErrorAction::None;
     lastResetMeasure = ResetMeasure::USB_PORT_POWER_CYCLE;
@@ -1532,6 +1547,9 @@ V4L2Cam::~V4L2Cam() noexcept
     uninitialize();
     
     evntFD->close_fd();
+    
+    clog << "V4L2Cam::~V4L2Cam: evntFD closed"
+         << endl;
 }
 
 
@@ -1625,10 +1643,11 @@ bool V4L2Cam::gatherSerialNumbers( string_view      vendorID
 }
 
 
-bool V4L2Cam::xioctl( FD_t const&  fd
-                    , uint64_t     request
-                    , void*        arg
-                    , XIOCTL_FLAGS callFlags
+bool V4L2Cam::xioctl( FD_t const&       fd
+                    , uint64_t          request
+                    , string_view const requestStr
+                    , void*             arg
+                    , XIOCTL_FLAGS      callFlags
                     )
 {
     using namespace std::chrono;
@@ -1751,13 +1770,13 @@ bool V4L2Cam::xioctl( FD_t const&  fd
                                 return false;
                             else
                                 goto XIOCTL_WRONG_USAGE; // Invalid argument
-            case EDOM  :    if (    ( callFlags & XIOCTL_FLAGS::EXPECT_EDOM)
+            case EDOM  :    if (    ( callFlags & XIOCTL_FLAGS::EXPECT_EDOM )
                                  != XIOCTL_FLAGS::NONE
                                )
                                 return false;
                             else
                                 goto XIOCTL_WRONG_USAGE; // Argument out of domain
-            case ENOTTY:    if (    ( callFlags & XIOCTL_FLAGS::EXPECT_ENOTTY)
+            case ENOTTY:    if (    ( callFlags & XIOCTL_FLAGS::EXPECT_ENOTTY )
                                  != XIOCTL_FLAGS::NONE
                                )
                                 return false;
@@ -1797,7 +1816,7 @@ XIOCTL_WRONG_USAGE:
     
     if ( r == -1 )
         clog << "V4L2Cam::xioctl: error occured. given request: "
-             << to_string(static_cast<unsigned long>(request))
+             << requestStr
              << endl;
     
     errno = errNo;
@@ -1835,7 +1854,8 @@ int32_t V4L2Cam::xopen( char    const* pathname
             else
             {
                 clog << "V4L2Cam::xopen: Failed to open character device after "
-                     << (attempt + 1) << " attempts: " << strerror(errNo)
+                     << (attempt + 1) << " attempts: " << strerror(errNo) << ". "
+                        "path:" << pathname
                      << endl;
                 
                 break;
@@ -1844,7 +1864,7 @@ int32_t V4L2Cam::xopen( char    const* pathname
         else if ( errNo == ENOENT || errNo == ENODEV )
         {
             clog << "V4L2Cam::xopen: character device not found: "
-                 << strerror(errNo)
+                 << strerror(errNo) << ". path:" << pathname
                  << endl;
             
             break;
@@ -1852,7 +1872,7 @@ int32_t V4L2Cam::xopen( char    const* pathname
         else
         {
             clog << "V4L2Cam::xopen: Failed to open character device: "
-                 << strerror(errNo)
+                 << strerror(errNo) << ". path:" << pathname
                  << endl;
             
             break;
@@ -1965,7 +1985,7 @@ bool V4L2Cam::isSetMemoryTypeSupported() noexcept
     req.type   = bufType;
     req.memory = memType;
     
-    if ( !xioctl(*fd_ptr, VIDIOC_REQBUFS, &req) ) [[unlikely]]
+    if ( !xioctl(*fd_ptr, VIDIOC_REQBUFS, "VIDIOC_REQBUFS", &req) ) [[unlikely]]
     {
         int const errNo = errno;
         
@@ -2007,7 +2027,7 @@ bool V4L2Cam::determineMaxBufferSizeNeeded(FD_t const& fd)
     
     originalFmt.type = bufType;
     
-    if ( !xioctl(fd, VIDIOC_G_FMT, &originalFmt) ) [[unlikely]]
+    if ( !xioctl(fd, VIDIOC_G_FMT, "VIDIOC_G_FMT", &originalFmt) ) [[unlikely]]
     {
         clog << "V4L2Cam::determineMaxBufferSizeNeeded: VIDIOC_G_FMT failed!"
              << endl;
@@ -2017,6 +2037,7 @@ bool V4L2Cam::determineMaxBufferSizeNeeded(FD_t const& fd)
     
     if ( !xioctl( fd
                 , VIDIOC_TRY_FMT
+                , "VIDIOC_TRY_FMT"
                 , &originalFmt
                 , XIOCTL_FLAGS::EXPECT_ENOTTY | XIOCTL_FLAGS::EXPECT_EINVAL
                 )
@@ -2040,7 +2061,13 @@ bool V4L2Cam::determineMaxBufferSizeNeeded(FD_t const& fd)
     int errNo{};
     
     // Enumerate all supported pixel formats
-    while ( xioctl(fd, VIDIOC_ENUM_FMT, &fmtDesc, XIOCTL_FLAGS::EXPECT_EINVAL) )
+    while ( xioctl( fd
+                  , VIDIOC_ENUM_FMT
+                  , "VIDIOC_ENUM_FMT"
+                  , &fmtDesc
+                  , XIOCTL_FLAGS::EXPECT_EINVAL
+                  )
+          )
     {
         uint32_t pixelFormat = fmtDesc.pixelformat;
         
@@ -2050,7 +2077,13 @@ bool V4L2Cam::determineMaxBufferSizeNeeded(FD_t const& fd)
         frmSize.pixel_format = pixelFormat;
         
         // Enumerate all frame sizes for the pixel format
-        while ( xioctl(fd, VIDIOC_ENUM_FRAMESIZES, &frmSize, XIOCTL_FLAGS::EXPECT_EINVAL) )
+        while ( xioctl( fd
+                      , VIDIOC_ENUM_FRAMESIZES
+                      , "VIDIOC_ENUM_FRAMESIZES"
+                      , &frmSize
+                      , XIOCTL_FLAGS::EXPECT_EINVAL
+                      )
+              )
         {
             uint32_t width {};
             uint32_t height{};
@@ -2100,22 +2133,15 @@ bool V4L2Cam::determineMaxBufferSizeNeeded(FD_t const& fd)
                              ,   SUPPORTS__VIDIOC_TRY_FMT
                                ? VIDIOC_TRY_FMT
                                : VIDIOC_S_FMT
+                             ,   SUPPORTS__VIDIOC_TRY_FMT
+                               ? "VIDIOC_TRY_FMT"
+                               : "VIDIOC_S_FMT"
                              , &fmt
                              );
             errNo = errno;
             
             if ( ret && fmt.fmt.pix.sizeimage > maxSizeImage )
                 maxSizeImage = fmt.fmt.pix.sizeimage;
-            else if ( !ret )
-                clog << "V4L2Cam::determineMaxBufferSizeNeeded: "
-                     << (   SUPPORTS__VIDIOC_TRY_FMT
-                          ? "VIDIOC_TRY_FMT"
-                          : "VIDIOC_S_FMT"
-                        )
-                     << " failed ("
-                     << strerror(errNo)
-                     << ")."
-                     << endl;
             
             ++frmSize.index;
         }
@@ -2144,7 +2170,7 @@ bool V4L2Cam::determineMaxBufferSizeNeeded(FD_t const& fd)
     }
     
     if (    !SUPPORTS__VIDIOC_TRY_FMT
-         && !xioctl(fd, VIDIOC_S_FMT, &originalFmt)
+         && !xioctl(fd, VIDIOC_S_FMT, "VIDIOC_S_FMT", &originalFmt)
        ) [[unlikely]]
     {
         apiToUse = APIToUse::UNKNOWN;
@@ -2166,32 +2192,41 @@ bool V4L2Cam::determineMaxBufferSizeNeeded(FD_t const& fd)
 
 void V4L2Cam::determineSettingDomains(FD_t const& fd)
 {
-    queryControlDomain(fd, V4L2_CID_BRIGHTNESS, BRIGHTNESS_DOMAIN_KNOWN,
-                       BRIGHTNESS_MIN, BRIGHTNESS_MAX, BRIGHTNESS_STEP);
-    queryControlDomain(fd, V4L2_CID_CONTRAST, CONTRAST_DOMAIN_KNOWN,
-                       CONTRAST_MIN, CONTRAST_MAX, CONTRAST_STEP);
-    queryControlDomain(fd, V4L2_CID_SATURATION, SATURATION_DOMAIN_KNOWN,
-                       SATURATION_MIN, SATURATION_MAX, SATURATION_STEP);
-    queryControlDomain(fd, V4L2_CID_SHARPNESS, SHARPNESS_DOMAIN_KNOWN,
-                       SHARPNESS_MIN, SHARPNESS_MAX, SHARPNESS_STEP);
-    queryControlDomain(fd, V4L2_CID_GAMMA, GAMMA_DOMAIN_KNOWN,
-                       GAMMA_MIN, GAMMA_MAX, GAMMA_STEP);
-    queryControlDomain(fd, V4L2_CID_WHITE_BALANCE_TEMPERATURE, WHITE_BALANCE_DOMAIN_KNOWN,
-                       WHITE_BALANCE_MIN, WHITE_BALANCE_MAX, WHITE_BALANCE_STEP);
-    queryControlDomain(fd, V4L2_CID_GAIN, GAIN_DOMAIN_KNOWN,
-                       GAIN_MIN, GAIN_MAX, GAIN_STEP);
+    queryControlDomain( fd, V4L2_CID_BRIGHTNESS, "V4L2_CID_BRIGHTNESS"
+                      , BRIGHTNESS_DOMAIN_KNOWN, BRIGHTNESS_MIN, BRIGHTNESS_MAX
+                      , BRIGHTNESS_STEP);
+    queryControlDomain( fd, V4L2_CID_CONTRAST, "V4L2_CID_CONTRAST"
+                      , CONTRAST_DOMAIN_KNOWN, CONTRAST_MIN, CONTRAST_MAX
+                      , CONTRAST_STEP);
+    queryControlDomain( fd, V4L2_CID_SATURATION, "V4L2_CID_SATURATION"
+                      , SATURATION_DOMAIN_KNOWN, SATURATION_MIN, SATURATION_MAX
+                      , SATURATION_STEP);
+    queryControlDomain( fd, V4L2_CID_SHARPNESS, "V4L2_CID_SHARPNESS"
+                      , SHARPNESS_DOMAIN_KNOWN, SHARPNESS_MIN, SHARPNESS_MAX
+                      , SHARPNESS_STEP);
+    queryControlDomain( fd, V4L2_CID_GAMMA, "V4L2_CID_GAMMA", GAMMA_DOMAIN_KNOWN
+                      , GAMMA_MIN, GAMMA_MAX, GAMMA_STEP);
+    queryControlDomain( fd, V4L2_CID_WHITE_BALANCE_TEMPERATURE
+                      , "V4L2_CID_WHITE_BALANCE_TEMPERATURE"
+                      , WHITE_BALANCE_DOMAIN_KNOWN, WHITE_BALANCE_MIN
+                      , WHITE_BALANCE_MAX, WHITE_BALANCE_STEP);
+    queryControlDomain( fd, V4L2_CID_GAIN, "V4L2_CID_GAIN", GAIN_DOMAIN_KNOWN
+                      , GAIN_MIN, GAIN_MAX, GAIN_STEP);
     // queryControlDomain(fd, V4L2_CID_EXPOSURE, EXPOSURE_DOMAIN_KNOWN,
     //                    EXPOSURE_MIN, EXPOSURE_MAX, EXPOSURE_STEP);
-    queryControlDomain(fd, V4L2_CID_EXPOSURE_ABSOLUTE, EXPOSURE_DOMAIN_KNOWN,
-                       EXPOSURE_MIN, EXPOSURE_MAX, EXPOSURE_STEP);
+    queryControlDomain( fd, V4L2_CID_EXPOSURE_ABSOLUTE
+                      , "V4L2_CID_EXPOSURE_ABSOLUTE", EXPOSURE_DOMAIN_KNOWN
+                      , EXPOSURE_MIN, EXPOSURE_MAX, EXPOSURE_STEP);
 }
 
-void V4L2Cam::queryControlDomain( FD_t     const& fd
-                                , uint32_t        controlID
-                                , bool          & domainKnown
-                                , int32_t       & min
-                                , int32_t       & max
-                                , int32_t       & step
+// TODO add param cidStr
+void V4L2Cam::queryControlDomain( FD_t        const& fd
+                                , uint32_t           controlID
+                                , string_view const  cidStr
+                                , bool             & domainKnown
+                                , int32_t          & min
+                                , int32_t          & max
+                                , int32_t          & step
                                 )
 {
     v4l2_queryctrl queryctrl{};
@@ -2200,6 +2235,7 @@ void V4L2Cam::queryControlDomain( FD_t     const& fd
     // Call ioctl directly so we can treat EINVAL/EDOM as "unsupported" quietly.
     if ( !xioctl( fd
                 , VIDIOC_QUERYCTRL
+                , "VIDIOC_QUERYCTRL"
                 , &queryctrl
                 , XIOCTL_FLAGS::EXPECT_EINVAL | XIOCTL_FLAGS::EXPECT_EDOM
                 )
@@ -2212,8 +2248,8 @@ void V4L2Cam::queryControlDomain( FD_t     const& fd
             return;
         
         // Otherwise, real error worth logging (I/O, bad fd, etc.).
-        clog << "V4L2Cam::queryControlDomain: VIDIOC_QUERYCTRL failed for 0x"
-             << std::hex << controlID << std::dec << ": " << strerror(errNo)
+        clog << "V4L2Cam::queryControlDomain: VIDIOC_QUERYCTRL failed for "
+             << cidStr << ": " << strerror(errNo)
              << endl;
         
         errno = errNo;
@@ -2273,9 +2309,15 @@ bool V4L2Cam::openV4L2FD() {
     return (bool)v4l2FD && (bool)*v4l2FD;
 }
 
-void V4L2Cam::closeV4L2FD() {
+void V4L2Cam::closeV4L2FD()
+{
     if ( v4l2FD && !*v4l2FD )
+    {
         v4l2FD->close_fd();
+        
+        clog << "V4L2Cam::closeV4L2FD: device fd explicitly closed"
+             << endl;
+    }
     
     v4l2FD.reset();
 }
@@ -2525,10 +2567,7 @@ bool V4L2Cam::resetUSBDevice( string const& usbBusNumber
     
     if ( !fd ) [[unlikely]]
     {
-        int const e = errno;
-        
-        clog << "V4L2Cam::resetUSBDevice: open " << path << " failed: "
-             << strerror(e)
+        clog << "V4L2Cam::resetUSBDevice: open " << path << " failed"
              << endl;
         
         return false;
@@ -2536,10 +2575,7 @@ bool V4L2Cam::resetUSBDevice( string const& usbBusNumber
 
     if ( ioctl(fd, USBDEVFS_RESET, 0) < 0 ) [[unlikely]]
     {
-        int const e = errno;
-        
-        clog << "V4L2Cam::resetUSBDevice: USBDEVFS_RESET failed: "
-             << strerror(e)
+        clog << "V4L2Cam::resetUSBDevice: USBDEVFS_RESET failed"
              << endl;
         
         return false;
@@ -2867,6 +2903,7 @@ bool V4L2Cam::decideMemoryType(uint32_t& memType) noexcept
 
 bool V4L2Cam::fetch_control_value( shared_ptr<FD_t> fd_ptr
                                  , uint32_t         id
+                                 , string_view const idStr
                                  , int32_t&         value
                                  )
 {
@@ -2875,12 +2912,12 @@ bool V4L2Cam::fetch_control_value( shared_ptr<FD_t> fd_ptr
     
     v4l2_control ctrl{id, {}};
     
-    if ( !xioctl(*fd_ptr, VIDIOC_G_CTRL, &ctrl) ) [[unlikely]]
+    if ( !xioctl(*fd_ptr, VIDIOC_G_CTRL, "VIDIOC_G_CTRL", &ctrl) ) [[unlikely]]
     {
         int const errNo = errno;
         
         clog << "V4L2Cam::fetch_control_value: VIDIOC_G_CTRL with id \'"
-             << to_string(id) << "\" failed (" << strerror(errNo) << ")."
+             << idStr << "\" failed (" << strerror(errNo) << ")."
              << endl;
         
         errno = errNo;
@@ -2892,9 +2929,10 @@ bool V4L2Cam::fetch_control_value( shared_ptr<FD_t> fd_ptr
     return true;
 }
 
-bool V4L2Cam::apply_control_value( shared_ptr<FD_t> fd_ptr
-                                 , uint32_t         id
-                                 , int32_t const    value
+bool V4L2Cam::apply_control_value( shared_ptr<FD_t>  fd_ptr
+                                 , uint32_t          id
+                                 , string_view const idStr
+                                 , int32_t const     value
                                  )
 {
     if ( !fd_ptr || !*fd_ptr ) [[unlikely]]
@@ -2902,12 +2940,12 @@ bool V4L2Cam::apply_control_value( shared_ptr<FD_t> fd_ptr
     
     v4l2_control ctrl{id, value};
     
-    if ( !xioctl(*fd_ptr, VIDIOC_S_CTRL, &ctrl) ) [[unlikely]]
+    if ( !xioctl(*fd_ptr, VIDIOC_S_CTRL, "VIDIOC_S_CTRL", &ctrl) ) [[unlikely]]
     {
         int const errNo = errno;
         
         clog << "V4L2Cam::apply_control_value: VIDIOC_S_CTRL with id \""
-             << to_string(id) << "\" and value \"" << to_string(value)
+             << idStr << "\" and value \"" << to_string(value)
              << "\" failed (" << strerror(errNo) << ")."
              << endl;
         
@@ -2927,36 +2965,31 @@ optional<v4l2_format> V4L2Cam::giveV4L2Format()
         return {};
     
     v4l2_format format{};
-    int errNo{};
     
     format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
-    if ( xioctl(*fd_ptr, VIDIOC_G_FMT, &format, XIOCTL_FLAGS::EXPECT_EINVAL) )
+    if ( xioctl( *fd_ptr
+               , VIDIOC_G_FMT
+               , "VIDIOC_G_FMT"
+               , &format
+               , XIOCTL_FLAGS::EXPECT_EINVAL
+               )
+       )
     {
         apiToUse = APIToUse::MULTI;
         
         return format;
     }
-    errNo = errno;
-    
-    if ( errNo != EINVAL ) [[unlikely]]
-        clog << "V4L2Cam::giveV4L2Format: VIDIOC_G_FMT with "
-                "V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE failed! (" << strerror(errNo) << ")"
-             << endl;
     
     format = {};
     format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    if ( xioctl(*fd_ptr, VIDIOC_G_FMT, &format) )
+    if ( xioctl(*fd_ptr, VIDIOC_G_FMT, "VIDIOC_G_FMT", &format) )
     {
         apiToUse = APIToUse::SINGLE;
         
         return format;
     }
-    errNo = errno;
     
     apiToUse = APIToUse::UNKNOWN;
-    
-    clog << "V4L2Cam::giveV4L2Format: requesting format failed! "
-         << strerror(errNo) << endl;
     
     return {};
 }
@@ -3015,7 +3048,7 @@ bool V4L2Cam::takeResolution(uint32_t const _width, uint32_t const _height)
     
     width            = _width;
     height           = _height;
-    resolutionSource = ssrc::GIVEN;
+    resolutionSource = ssrc::USER;
     
     return true;
 }
@@ -3053,7 +3086,7 @@ bool V4L2Cam::takePixelFormat(PixelFormat const _pixelFormat)
         return false;
     
     pixelFormat       = _pixelFormat;
-    pixelFormatSource = ssrc::GIVEN;
+    pixelFormatSource = ssrc::USER;
     
     return true;
 }
@@ -3083,14 +3116,19 @@ bool V4L2Cam::fetchResolutionAndPixelFormat()
         return false;
     
     v4l2_format format{};
-    int errNo{};
     
-    resolutionSource  = ssrc::FETCHED;
-    pixelFormatSource = ssrc::FETCHED;
+    resolutionSource  = ssrc::DEVICE;
+    pixelFormatSource = ssrc::DEVICE;
     
     format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
     
-    if ( xioctl(*fd_ptr, VIDIOC_G_FMT, &format, XIOCTL_FLAGS::EXPECT_EINVAL) )
+    if ( xioctl( *fd_ptr
+               , VIDIOC_G_FMT
+               , "VIDIOC_G_FMT"
+               , &format
+               , XIOCTL_FLAGS::EXPECT_EINVAL
+               )
+       )
     {
         apiToUse = APIToUse::MULTI;
         
@@ -3113,19 +3151,11 @@ bool V4L2Cam::fetchResolutionAndPixelFormat()
         
         return true;
     }
-    errNo = errno;
-    
-    if ( errNo != EINVAL ) [[unlikely]]
-        clog << "V4L2Cam::fetchResolutionAndPixelFormat: VIDIOC_G_FMT with "
-                "V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE failed! ("
-             << strerror(errNo)
-             << ")"
-             << endl;
     
     format = {};
     format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     
-    if ( xioctl(*fd_ptr, VIDIOC_G_FMT, &format) )
+    if ( xioctl(*fd_ptr, VIDIOC_G_FMT, "VIDIOC_G_FMT", &format) )
     {
         apiToUse = APIToUse::SINGLE;
         
@@ -3143,13 +3173,6 @@ bool V4L2Cam::fetchResolutionAndPixelFormat()
         
         return true;
     }
-    errNo = errno;
-    
-    clog << "V4L2Cam::fetchResolutionAndPixelFormat: VIDIOC_G_FMT with "
-            "V4L2_BUF_TYPE_VIDEO_CAPTURE failed! ("
-         << strerror(errNo)
-         << ")"
-         << endl;
 
     apiToUse = APIToUse::UNKNOWN;
     
@@ -3176,12 +3199,14 @@ bool V4L2Cam::applyResolutionAndPixelFormat()
     
     format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
     
-    if ( xioctl(*fd_ptr, VIDIOC_G_FMT, &format, XIOCTL_FLAGS::EXPECT_EINVAL) )
+    if ( xioctl( *fd_ptr
+               , VIDIOC_G_FMT
+               , "VIDIOC_G_FMT"
+               , &format
+               , XIOCTL_FLAGS::EXPECT_EINVAL
+               )
+       )
     {
-        // clog << "V4L2Cam::applyResolutionAndPixelFormat: VIDIOC_G_FMT with "
-        //         "V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE succeeded"
-        //      << endl;
-        
         apiToUse = APIToUse::MULTI;
         
         format.fmt.pix_mp.width       = width      .value();
@@ -3192,24 +3217,12 @@ bool V4L2Cam::applyResolutionAndPixelFormat()
     }
     else
     {
-        int errNo = errno;
-        
-        if ( errNo != EINVAL ) [[unlikely]]
-            clog << "V4L2Cam::applyResolutionAndPixelFormat: VIDIOC_G_FMT with "
-                    "V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE failed! ("
-                 << strerror(errNo) << ")"
-                 << endl;
-        
         format = {};
         
         format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         
-        if ( xioctl(*fd_ptr, VIDIOC_G_FMT, &format) )
+        if ( xioctl(*fd_ptr, VIDIOC_G_FMT, "VIDIOC_G_FMT", &format) )
         {
-            // clog << "V4L2Cam::applyResolutionAndPixelFormat: VIDIOC_G_FMT with "
-            //         "V4L2_BUF_TYPE_VIDEO_CAPTURE succeeded"
-            //      << endl;
-            
             apiToUse = APIToUse::SINGLE;
             
             format.fmt.pix.width       = width      .value();
@@ -3220,13 +3233,6 @@ bool V4L2Cam::applyResolutionAndPixelFormat()
         }
         else
         {
-            errNo = errno;
-            
-            clog << "V4L2Cam::applyResolutionAndPixelFormat: VIDIOC_G_FMT with "
-                    "V4L2_BUF_TYPE_VIDEO_CAPTURE failed! ("
-                 << strerror(errNo) << ")"
-                 << endl;
-            
             apiToUse = APIToUse::UNKNOWN;
             
             return false;
@@ -3234,20 +3240,14 @@ bool V4L2Cam::applyResolutionAndPixelFormat()
     }
     
     
-    if ( xioctl(*fd_ptr, VIDIOC_S_FMT, &format) ) [[  likely]]
+    if ( xioctl(*fd_ptr, VIDIOC_S_FMT, "VIDIOC_S_FMT", &format) ) [[  likely]]
     {
-        // clog << "V4L2Cam::applyResolutionAndPixelFormat: VIDIOC_S_FMT succeeded"
-        //      << endl;
-        
         currentBufferSizeNeeded = format.fmt.pix.sizeimage;
         
         return true;
     }
     else
     {
-        clog << "V4L2Cam::applyResolutionAndPixelFormat: VIDIOC_S_FMT failed"
-             << endl;
-        
         currentBufferSizeNeeded.reset();
         
         return false;
@@ -3297,7 +3297,7 @@ bool V4L2Cam::takeBrightness(int32_t const _brightness)
         return false;
     
     brightness       = _brightness;
-    brightnessSource = ssrc::GIVEN;
+    brightnessSource = ssrc::USER;
     
     return true;
 }
@@ -3320,20 +3320,18 @@ bool V4L2Cam::fetchBrightness()
 {
     int32_t value{};
     
-    brightnessSource = ssrc::FETCHED;
-
     bool fetched = fetch_control_value( produceV4L2FD()
                                       , V4L2_CID_BRIGHTNESS
+                                      , "V4L2_CID_BRIGHTNESS"
                                       , value
                                       );
-    
-    if ( !fetched ) [[unlikely]]
-        clog << "V4L2Cam::fetchBrightness: V4L2_CID_BRIGHTNESS failed"
-             << endl;
     
     brightness = fetched && checkBrightness(value)
                ? decltype(brightness)(value)
                : decltype(brightness)(nullopt);
+    
+    if ( brightness )
+        brightnessSource = ssrc::DEVICE;
     
     return fetched;
 }
@@ -3348,10 +3346,17 @@ bool V4L2Cam::applyBrightness()
     if ( BRIGHTNESS_DOMAIN_KNOWN && BRIGHTNESS_STEP != 1 )
         value -= (value - BRIGHTNESS_MIN) % BRIGHTNESS_STEP;
     
-    return apply_control_value( produceV4L2FD()
-                              , V4L2_CID_BRIGHTNESS
-                              , value
-                              );
+    if ( !apply_control_value( produceV4L2FD()
+                             , V4L2_CID_BRIGHTNESS
+                             , "V4L2_CID_BRIGHTNESS"
+                             , value
+                             )
+       )
+        return false;
+    
+    brightnessSource = ssrc::DEVICE;
+    
+    return true;
 }
 
 
@@ -3375,7 +3380,7 @@ bool V4L2Cam::takeContrast(int32_t const _contrast)
         return false;
     
     contrast       = _contrast;
-    contrastSource = ssrc::GIVEN;
+    contrastSource = ssrc::USER;
     
     return true;
 }
@@ -3397,21 +3402,19 @@ bool V4L2Cam::checkContrast()
 bool V4L2Cam::fetchContrast()
 {
     int32_t value{};
-    
-    contrastSource = ssrc::FETCHED;
 
     bool fetched = fetch_control_value( produceV4L2FD()
                                       , V4L2_CID_CONTRAST
+                                      , "V4L2_CID_CONTRAST"
                                       , value
                                       );
-    
-    if ( !fetched ) [[unlikely]]
-        clog << "V4L2Cam::fetchContrast: V4L2_CID_CONTRAST failed"
-             << endl;
     
     contrast = fetched && checkContrast(value)
              ? decltype(contrast)(value)
              : decltype(contrast)(nullopt);
+    
+    if ( contrast )
+        contrastSource = ssrc::DEVICE;
     
     return fetched;
 }
@@ -3426,10 +3429,17 @@ bool V4L2Cam::applyContrast()
     if ( CONTRAST_DOMAIN_KNOWN && CONTRAST_STEP != 1 )
         value -= (value - CONTRAST_MIN) % CONTRAST_STEP;
     
-    return apply_control_value( produceV4L2FD()
-                              , V4L2_CID_CONTRAST
-                              , value
-                              );
+    if ( !apply_control_value( produceV4L2FD()
+                             , V4L2_CID_CONTRAST
+                             , "V4L2_CID_CONTRAST"
+                             , value
+                             )
+       )
+        return false;
+    
+    contrastSource = ssrc::DEVICE;
+    
+    return true;
 }
 
 
@@ -3453,7 +3463,7 @@ bool V4L2Cam::takeSaturation(int32_t const _saturation)
         return false;
     
     saturation       = _saturation;
-    saturationSource = ssrc::GIVEN;
+    saturationSource = ssrc::USER;
     
     return true;
 }
@@ -3475,21 +3485,19 @@ bool V4L2Cam::checkSaturation()
 bool V4L2Cam::fetchSaturation()
 {
     int32_t value{};
-    
-    saturationSource = ssrc::FETCHED;
 
     bool fetched = fetch_control_value( produceV4L2FD()
                                       , V4L2_CID_SATURATION
+                                      , "V4L2_CID_SATURATION"
                                       , value
                                       );
-    
-    if ( !fetched ) [[unlikely]]
-        clog << "V4L2Cam::fetchSaturation: V4L2_CID_SATURATION failed"
-             << endl;
     
     saturation = fetched && checkSaturation(value)
                ? decltype(saturation)(value)
                : decltype(saturation)(nullopt);
+    
+    if ( saturation )
+    saturationSource = ssrc::DEVICE;
     
     return fetched;
 }
@@ -3504,10 +3512,17 @@ bool V4L2Cam::applySaturation()
     if ( SATURATION_DOMAIN_KNOWN && SATURATION_STEP != 1 )
         value -= (value - SATURATION_MIN) % SATURATION_STEP;
     
-    return apply_control_value( produceV4L2FD()
-                              , V4L2_CID_SATURATION
-                              , value
-                              );
+    if ( !apply_control_value( produceV4L2FD()
+                             , V4L2_CID_SATURATION
+                             , "V4L2_CID_SATURATION"
+                             , value
+                             )
+       )
+        return false;
+    
+    saturationSource = ssrc::DEVICE;
+    
+    return true;
 }
 
 
@@ -3531,7 +3546,7 @@ bool V4L2Cam::takeSharpness(int32_t const _sharpness)
         return false;
     
     sharpness       = _sharpness;
-    sharpnessSource = ssrc::GIVEN;
+    sharpnessSource = ssrc::USER;
     
     return true;
 }
@@ -3553,21 +3568,19 @@ bool V4L2Cam::checkSharpness()
 bool V4L2Cam::fetchSharpness()
 {
     int32_t value{};
-    
-    sharpnessSource = ssrc::FETCHED;
 
     bool fetched = fetch_control_value( produceV4L2FD()
                                       , V4L2_CID_SHARPNESS
+                                      , "V4L2_CID_SHARPNESS"
                                       , value
                                       );
-    
-    if ( !fetched ) [[unlikely]]
-        clog << "V4L2Cam::fetchSharpness: V4L2_CID_SHARPNESS failed"
-             << endl;
     
     sharpness = fetched && checkSharpness(value)
               ? decltype(sharpness)(value)
               : decltype(sharpness)(nullopt);
+    
+    if ( sharpness )
+        sharpnessSource = ssrc::DEVICE;
     
     return fetched;
 }
@@ -3582,10 +3595,17 @@ bool V4L2Cam::applySharpness()
     if ( SHARPNESS_DOMAIN_KNOWN && SHARPNESS_STEP != 1 )
         value -= (value - SHARPNESS_MIN) % SHARPNESS_STEP;
     
-    return apply_control_value( produceV4L2FD()
-                              , V4L2_CID_SHARPNESS
-                              , value
-                              );
+    if ( !apply_control_value( produceV4L2FD()
+                             , V4L2_CID_SHARPNESS
+                             , "V4L2_CID_SHARPNESS"
+                             , value
+                             )
+       )
+        return false;
+    
+    sharpnessSource = ssrc::DEVICE;
+    
+    return true;
 }
 
 
@@ -3609,7 +3629,7 @@ bool V4L2Cam::takeGamma(int32_t const _gamma)
         return false;
     
     gamma       = _gamma;
-    gammaSource = ssrc::GIVEN;
+    gammaSource = ssrc::USER;
     
     return true;
 }
@@ -3631,21 +3651,19 @@ bool V4L2Cam::checkGamma()
 bool V4L2Cam::fetchGamma()
 {
     int32_t value{};
-    
-    gammaSource = ssrc::FETCHED;
 
     bool fetched = fetch_control_value( produceV4L2FD()
                                       , V4L2_CID_GAMMA
+                                      , "V4L2_CID_GAMMA"
                                       , value
                                       );
-    
-    if ( !fetched ) [[unlikely]]
-        clog << "V4L2Cam::fetchGamma: V4L2_CID_GAMMA failed"
-             << endl;
     
     gamma = fetched && checkGamma(value)
           ? decltype(gamma)(value)
           : decltype(gamma)(nullopt);
+    
+    if ( gamma )
+        gammaSource = ssrc::DEVICE;
     
     return fetched;
 }
@@ -3660,10 +3678,17 @@ bool V4L2Cam::applyGamma()
     if ( GAMMA_DOMAIN_KNOWN && GAMMA_STEP != 1 )
         value -= (value - GAMMA_MIN) % GAMMA_STEP;
     
-    return apply_control_value( produceV4L2FD()
-                              , V4L2_CID_GAMMA
-                              , value
-                              );
+    if ( !apply_control_value( produceV4L2FD()
+                             , V4L2_CID_GAMMA
+                             , "V4L2_CID_GAMMA"
+                             , value
+                             )
+       )
+        return false;
+    
+    gammaSource = ssrc::DEVICE;
+    
+    return true;
 }
 
 
@@ -3687,7 +3712,7 @@ bool V4L2Cam::takeWhiteBalance(int32_t const _whiteBalance)
         return false;
     
     whiteBalance       = _whiteBalance;
-    whiteBalanceSource = ssrc::GIVEN;
+    whiteBalanceSource = ssrc::USER;
     
     return true;
 }
@@ -3709,22 +3734,19 @@ bool V4L2Cam::checkWhiteBalance()
 bool V4L2Cam::fetchWhiteBalance()
 {
     int32_t value{};
-    
-    whiteBalanceSource = ssrc::FETCHED;
 
     bool fetched = fetch_control_value( produceV4L2FD()
                                       , V4L2_CID_WHITE_BALANCE_TEMPERATURE
+                                      , "V4L2_CID_WHITE_BALANCE_TEMPERATURE"
                                       , value
                                       );
-    
-    if ( !fetched ) [[unlikely]]
-        clog << "V4L2Cam::fetchWhiteBalance: "
-                "V4L2_CID_WHITE_BALANCE_TEMPERATURE failed"
-             << endl;
     
     whiteBalance = fetched && checkWhiteBalance(value)
                  ? decltype(whiteBalance)(value)
                  : decltype(whiteBalance)(nullopt);
+    
+    if ( whiteBalance )
+        whiteBalanceSource = ssrc::DEVICE;
     
     return fetched;
 }
@@ -3739,10 +3761,17 @@ bool V4L2Cam::applyWhiteBalance()
     if ( WHITE_BALANCE_DOMAIN_KNOWN && WHITE_BALANCE_STEP != 1 )
         value -= (value - WHITE_BALANCE_MIN) % WHITE_BALANCE_STEP;
     
-    return apply_control_value( produceV4L2FD()
-                              , V4L2_CID_WHITE_BALANCE_TEMPERATURE
-                              , value
-                              );
+    if ( !apply_control_value( produceV4L2FD()
+                             , V4L2_CID_WHITE_BALANCE_TEMPERATURE
+                             , "V4L2_CID_WHITE_BALANCE_TEMPERATURE"
+                             , value
+                             )
+       )
+        return false;
+    
+    whiteBalanceSource = ssrc::DEVICE;
+    
+    return true;
 }
 
 
@@ -3766,7 +3795,7 @@ bool V4L2Cam::takeGain(int32_t const _gain)
         return false;
     
     gain       = _gain;
-    gainSource = ssrc::GIVEN;
+    gainSource = ssrc::USER;
     
     return true;
 }
@@ -3788,21 +3817,19 @@ bool V4L2Cam::checkGain()
 bool V4L2Cam::fetchGain()
 {
     int32_t value{};
-    
-    gainSource = ssrc::FETCHED;
 
     bool fetched = fetch_control_value( produceV4L2FD()
                                       , V4L2_CID_GAIN
+                                      , "V4L2_CID_GAIN"
                                       , value
                                       );
-    
-    if ( !fetched ) [[unlikely]]
-        clog << "V4L2Cam::fetchGain: V4L2_CID_GAIN failed"
-             << endl;
     
     gain = fetched && checkGain(value)
          ? decltype(gain)(value)
          : decltype(gain)(nullopt);
+    
+    if ( gain )
+        gainSource = ssrc::DEVICE;
     
     return fetched;
 }
@@ -3817,10 +3844,17 @@ bool V4L2Cam::applyGain()
     if ( GAIN_DOMAIN_KNOWN && GAIN_STEP != 1 )
         value -= (value - GAIN_MIN) % GAIN_STEP;
     
-    return apply_control_value( produceV4L2FD()
-                              , V4L2_CID_GAIN
-                              , value
-                              );
+    if ( !apply_control_value( produceV4L2FD()
+                             , V4L2_CID_GAIN
+                             , "V4L2_CID_GAIN"
+                             , value
+                             )
+       )
+        return false;
+    
+    gainSource = ssrc::DEVICE;
+    
+    return true;
 }
 
 
@@ -3846,7 +3880,7 @@ bool V4L2Cam::takePowerLineFrequency(uint8_t const _powerLineFrequency)
         return false;
     
     powerLineFrequency       = plf;
-    powerLineFrequencySource = ssrc::GIVEN;
+    powerLineFrequencySource = ssrc::USER;
     
     return true;
 }
@@ -3857,26 +3891,21 @@ bool V4L2Cam::fetchPowerLineFrequency()
 {
     int32_t value{};
     
-    powerLineFrequencySource = ssrc::FETCHED;
+    bool fetched = fetch_control_value( produceV4L2FD()
+                                      , V4L2_CID_POWER_LINE_FREQUENCY
+                                      , "V4L2_CID_POWER_LINE_FREQUENCY"
+                                      , value
+                                      );
 
-    if ( fetch_control_value( produceV4L2FD()
-                            , V4L2_CID_POWER_LINE_FREQUENCY
-                            , value
-                            )
-       )
-    {
+    if ( fetched )
         powerLineFrequency = enum_cast<PowerLineFrequency>(value);
-        
-        return true;
-    } else {
-        clog << "V4L2Cam::fetchPowerLineFrequency: "
-                "V4L2_CID_POWER_LINE_FREQUENCY failed"
-             << endl;
-        
+    else
         powerLineFrequency.reset();
-        
-        return false;
-    }
+    
+    if ( powerLineFrequency )
+        powerLineFrequencySource = ssrc::DEVICE;
+    
+    return fetched;
 }
 
 bool V4L2Cam::applyPowerLineFrequency()
@@ -3884,10 +3913,17 @@ bool V4L2Cam::applyPowerLineFrequency()
     if ( !powerLineFrequency.has_value() )
         return false;
     
-    return apply_control_value( produceV4L2FD()
-                              , V4L2_CID_POWER_LINE_FREQUENCY
-                              , enum_integer(powerLineFrequency.value())
-                              );
+    if ( !apply_control_value( produceV4L2FD()
+                             , V4L2_CID_POWER_LINE_FREQUENCY
+                             , "V4L2_CID_POWER_LINE_FREQUENCY"
+                             , enum_integer(powerLineFrequency.value())
+                             )
+       )
+        return false;
+    
+    powerLineFrequencySource = ssrc::DEVICE;
+    
+    return true;
 }
 
 
@@ -3911,7 +3947,7 @@ bool V4L2Cam::takeExposure(int32_t const _exposure)
         return false;
     
     exposure       = _exposure;
-    exposureSource = ssrc::GIVEN;
+    exposureSource = ssrc::USER;
     
     return true;
 }
@@ -3933,21 +3969,19 @@ bool V4L2Cam::checkExposure()
 bool V4L2Cam::fetchExposure()
 {
     int32_t value{};
-    
-    exposureSource = ssrc::FETCHED;
 
     bool fetched = fetch_control_value( produceV4L2FD()
                                       , V4L2_CID_EXPOSURE_ABSOLUTE
+                                      , "V4L2_CID_EXPOSURE_ABSOLUTE"
                                       , value
                                       );
-    
-    if ( !fetched ) [[unlikely]]
-        clog << "V4L2Cam::fetchExposure: V4L2_CID_EXPOSURE_ABSOLUTE failed"
-             << endl;
     
     exposure = fetched && checkExposure(value)
              ? decltype(exposure)(value)
              : decltype(exposure)(nullopt);
+    
+    if ( exposure )
+        exposureSource = ssrc::DEVICE;
     
     return fetched;
 }
@@ -3962,10 +3996,17 @@ bool V4L2Cam::applyExposure()
     if ( EXPOSURE_DOMAIN_KNOWN && EXPOSURE_STEP != 1 )
         value -= (value - EXPOSURE_MIN) % EXPOSURE_STEP;
     
-    return apply_control_value( produceV4L2FD()
-                              , V4L2_CID_EXPOSURE_ABSOLUTE
-                              , value
-                              );
+    if ( !apply_control_value( produceV4L2FD()
+                             , V4L2_CID_EXPOSURE_ABSOLUTE
+                             , "V4L2_CID_EXPOSURE_ABSOLUTE"
+                             , value
+                             )
+       )
+        return false;
+    
+    exposureSource = ssrc::DEVICE;
+    
+    return true;
 }
 
 

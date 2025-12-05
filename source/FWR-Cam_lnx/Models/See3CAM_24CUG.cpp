@@ -313,49 +313,49 @@ void See3CAM_24CUG::_uninitialize() {
     closeHIDFD();
     hidPath.clear();
     
-    effectModeSource = ssrc::UNKNOWN;
+    effectModeSource = ssrc::NONE;
     effectMode.reset();
     
-    deNoiseValueSource = ssrc::UNKNOWN;
+    deNoiseValueSource = ssrc::NONE;
     deNoiseValue.reset();
     
-    autoExpoModeAndROISource = ssrc::UNKNOWN;
+    autoExpoModeAndROISource = ssrc::NONE;
     autoExpoMode.reset();
     autoExpoROIxCoord.reset();
     autoExpoROIyCoord.reset();
     autoExpoROISize.reset();
     
-    exposureCompensationSource = ssrc::UNKNOWN;
+    exposureCompensationSource = ssrc::NONE;
     exposureCompensation.reset();
     
-    burstLengthSource = ssrc::UNKNOWN;
+    burstLengthSource = ssrc::NONE;
     burstLength.reset();
     
-    qFactorSource = ssrc::UNKNOWN;
+    qFactorSource = ssrc::NONE;
     qFactor.reset();
     
-    mirrorModeSource = ssrc::UNKNOWN;
+    mirrorModeSource = ssrc::NONE;
     mirrorMode.reset();
     
-    framerateSource = ssrc::UNKNOWN;
+    framerateSource = ssrc::NONE;
     framerate.reset();
     
-    faceDetectModeSource = ssrc::UNKNOWN;
+    faceDetectModeSource = ssrc::NONE;
     faceRectMode.reset();
     faceEmbedMode.reset();
     faceOverlayRectMode.reset();
     
-    smileDetectModeSource = ssrc::UNKNOWN;
+    smileDetectModeSource = ssrc::NONE;
     smileDetectMode.reset();
     smileEmbedMode.reset();
     
-    flickerDetectModeSource = ssrc::UNKNOWN;
+    flickerDetectModeSource = ssrc::NONE;
     flickerDetectMode.reset();
     
-    flashModeSource = ssrc::UNKNOWN;
+    flashModeSource = ssrc::NONE;
     flashMode.reset();
     
-    streamModeSource = ssrc::UNKNOWN;
+    streamModeSource = ssrc::NONE;
     streamMode.reset();
     streamModeFunctionLock.reset();
     
@@ -601,7 +601,7 @@ bool See3CAM_24CUG::drainHidInput(size_t reportLen)
             return false;
         
         if ( errno == EAGAIN || errno == EWOULDBLOCK )
-            // nothing left to read → drained
+            // nothing left to read -> drained
             break;
         
         if ( errno == EINTR )
@@ -710,7 +710,7 @@ bool See3CAM_24CUG::takeEffectMode(uint8_t const _effectMode)
     
     effectMode = mode;
     
-    effectModeSource = ssrc::GIVEN;
+    effectModeSource = ssrc::USER;
     
     return true;
 }
@@ -724,7 +724,7 @@ bool See3CAM_24CUG::fetchEffectMode()
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
     g_out_packet_buf[2] = GET_SPECIALEFFECT_24CUG;
     
-    effectModeSource = ssrc::FETCHED;
+    effectModeSource = ssrc::DEVICE;
 
     if (    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
          && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
@@ -791,7 +791,7 @@ bool See3CAM_24CUG::takeDeNoiseValue(uint8_t const _deNoiseValue)
     
     deNoiseValue = _deNoiseValue;
     
-    deNoiseValueSource = ssrc::GIVEN;
+    deNoiseValueSource = ssrc::USER;
     
     return true;
 }
@@ -810,7 +810,7 @@ bool See3CAM_24CUG::fetchDeNoiseValue()
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
     g_out_packet_buf[2] = GET_DENOISE_24CUG;
     
-    deNoiseValueSource = ssrc::FETCHED;
+    deNoiseValueSource = ssrc::DEVICE;
     
     if (    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
          && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
@@ -936,7 +936,7 @@ bool See3CAM_24CUG::takeAutoExpoModeAndROI( uint8_t  const _autoExpoMode )
     autoExpoROIyCoord.reset();
     autoExpoROISize  .reset();
     
-    autoExpoModeAndROISource = ssrc::GIVEN;
+    autoExpoModeAndROISource = ssrc::USER;
     
     return true;
 }
@@ -960,7 +960,7 @@ bool See3CAM_24CUG::takeAutoExpoModeAndROI( uint8_t  const _autoExpoMode
         autoExpoROIyCoord.reset();
         autoExpoROISize  .reset();
         
-        autoExpoModeAndROISource = ssrc::GIVEN;
+        autoExpoModeAndROISource = ssrc::USER;
         
         return true;
     }
@@ -998,7 +998,7 @@ bool See3CAM_24CUG::takeAutoExpoModeAndROI( uint8_t  const _autoExpoMode
     autoExpoROIyCoord = camYCoord;
     autoExpoROISize   = _roiSize;
     
-    autoExpoModeAndROISource = ssrc::GIVEN;
+    autoExpoModeAndROISource = ssrc::USER;
     
     return true;
 }
@@ -1034,7 +1034,7 @@ bool See3CAM_24CUG::fetchAutoExpoModeAndROI()
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
     g_out_packet_buf[2] = GET_EXP_ROI_MODE_24CUG;
     
-    autoExpoModeAndROISource = ssrc::FETCHED;
+    autoExpoModeAndROISource = ssrc::DEVICE;
     
     if (    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
          && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
@@ -1124,7 +1124,7 @@ bool See3CAM_24CUG::takeExposureCompensation(uint32_t const _exposureCompensatio
     
     exposureCompensation = _exposureCompensation;
     
-    exposureCompensationSource = ssrc::GIVEN;
+    exposureCompensationSource = ssrc::USER;
     
     return true;
 }
@@ -1143,7 +1143,7 @@ bool See3CAM_24CUG::fetchExposureCompensation()
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
     g_out_packet_buf[2] = GET_EXPOSURE_COMPENSATION_24CUG;
     
-    exposureCompensationSource = ssrc::FETCHED;
+    exposureCompensationSource = ssrc::DEVICE;
     
     if (    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
          && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG 
@@ -1213,7 +1213,7 @@ bool See3CAM_24CUG::takeBurstLength(uint8_t const _burstLength)
 {
     burstLength = _burstLength;
     
-    burstLengthSource = ssrc::GIVEN;
+    burstLengthSource = ssrc::USER;
     
     return true;
 }
@@ -1228,7 +1228,7 @@ bool See3CAM_24CUG::fetchBurstLength()
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
     g_out_packet_buf[2] = GET_BURST_LENGTH_24CUG;
     
-    burstLengthSource = ssrc::FETCHED;
+    burstLengthSource = ssrc::DEVICE;
     
     if (    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
          && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
@@ -1295,7 +1295,7 @@ bool See3CAM_24CUG::takeQFactor(uint8_t const _qFactor)
     
     qFactor = _qFactor;
     
-    qFactorSource = ssrc::GIVEN;
+    qFactorSource = ssrc::USER;
     
     return true;
 }
@@ -1314,7 +1314,7 @@ bool See3CAM_24CUG::fetchQFactor()
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
     g_out_packet_buf[2] = GET_Q_FACTOR_24CUG;
     
-    qFactorSource = ssrc::FETCHED;
+    qFactorSource = ssrc::DEVICE;
     
     if (    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
          && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
@@ -1390,7 +1390,7 @@ bool See3CAM_24CUG::takeMirrorMode( bool const _horizontal
                                                 : MirrorMode::NONE )
     );
     
-    mirrorModeSource = ssrc::GIVEN;
+    mirrorModeSource = ssrc::USER;
     
     return true;
 }
@@ -1404,7 +1404,7 @@ bool See3CAM_24CUG::fetchMirrorMode()
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
     g_out_packet_buf[2] = GET_FLIP_MODE_24CUG;
     
-    mirrorModeSource = ssrc::FETCHED;
+    mirrorModeSource = ssrc::DEVICE;
     
     if (    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
          && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
@@ -1471,7 +1471,7 @@ bool See3CAM_24CUG::takeFramerate(uint8_t const _framerate)
     
     framerate = _framerate;
     
-    framerateSource = ssrc::GIVEN;
+    framerateSource = ssrc::USER;
     
     return true;
 }
@@ -1490,7 +1490,7 @@ bool See3CAM_24CUG::fetchFramerate()
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
     g_out_packet_buf[2] = GET_FRAME_RATE_24CUG;
     
-    framerateSource = ssrc::FETCHED;
+    framerateSource = ssrc::DEVICE;
     
     if (    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
          && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
@@ -1570,7 +1570,7 @@ bool See3CAM_24CUG::takeFaceDetectMode( bool const _faceDetect
                         ? FaceOverlayRectMode::ENABLE
                         : FaceOverlayRectMode::DISABLE;
     
-    faceDetectModeSource = ssrc::GIVEN;
+    faceDetectModeSource = ssrc::USER;
     
     return true;
 }
@@ -1599,7 +1599,7 @@ bool See3CAM_24CUG::fetchFaceDetectMode()
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
     g_out_packet_buf[2] = GET_FACE_DETECT_RECT_24CUG;
     
-    faceDetectModeSource = ssrc::FETCHED;
+    faceDetectModeSource = ssrc::DEVICE;
     
     if (    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
          && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
@@ -1678,7 +1678,7 @@ bool See3CAM_24CUG::takeSmileDetectMode( bool const _smileDetect
                     ? SmileEmbedMode::ENABLE
                     : SmileEmbedMode::DISABLE;
     
-    smileDetectModeSource = ssrc::GIVEN;
+    smileDetectModeSource = ssrc::USER;
     
     return true;
 }
@@ -1705,7 +1705,7 @@ bool See3CAM_24CUG::fetchSmileDetectMode()
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
     g_out_packet_buf[2] = GET_SMILE_DETECTION;
     
-    smileDetectModeSource = ssrc::FETCHED;
+    smileDetectModeSource = ssrc::DEVICE;
     
     if (    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
          && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
@@ -1776,7 +1776,7 @@ bool See3CAM_24CUG::takeFlickerDetectMode(uint8_t const _flickerMode)
     
     flickerDetectMode = mode;
     
-    flickerDetectModeSource = ssrc::GIVEN;
+    flickerDetectModeSource = ssrc::USER;
     
     return true;
 }
@@ -1790,7 +1790,7 @@ bool See3CAM_24CUG::fetchFlickerDetectMode()
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
     g_out_packet_buf[2] = GET_FLICKER_CONRTOL_24CUG;
     
-    flickerDetectModeSource = ssrc::FETCHED;
+    flickerDetectModeSource = ssrc::DEVICE;
     
     if (    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
          && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
@@ -1857,7 +1857,7 @@ bool See3CAM_24CUG::takeFlashMode(uint8_t const _flashMode)
     
     flashMode = mode;
     
-    flashModeSource = ssrc::GIVEN;
+    flashModeSource = ssrc::USER;
     
     return true;
 }
@@ -1871,7 +1871,7 @@ bool See3CAM_24CUG::fetchFlashMode()
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
     g_out_packet_buf[2] = GET_STROBE_CONTROL_24CUG;
     
-    flashModeSource = ssrc::FETCHED;
+    flashModeSource = ssrc::DEVICE;
     
     if (    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
          && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
@@ -1944,7 +1944,7 @@ bool See3CAM_24CUG::takeStreamMode( uint8_t const _streamMode
     streamMode             = mode;
     streamModeFunctionLock = _autoFunctionLock;
     
-    streamModeSource = ssrc::GIVEN;
+    streamModeSource = ssrc::USER;
     
     return true;
 }
@@ -1971,7 +1971,7 @@ bool See3CAM_24CUG::fetchStreamMode()
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
     g_out_packet_buf[2] = GET_STREAM_MODE_24CUG;
     
-    streamModeSource = ssrc::FETCHED;
+    streamModeSource = ssrc::DEVICE;
 
     if (    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
          && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG

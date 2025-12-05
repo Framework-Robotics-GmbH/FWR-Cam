@@ -40,9 +40,9 @@ namespace FWR::Cam_lnx::Models
  *   domains and value checking
  * - communication with the device
  * For every setting it gets tracked, wether the locally stored value comes from
- * the user (SettingSource::GIVEN) or from the device (SettingSource::FETCHED).
- * On successful take* the state gets set to GIVEN, on every fetch* it gets set
- * to FETCHED.
+ * the user (SettingSource::USER) or from the device (SettingSource::DEVICE).
+ * On successful take* the state gets set to USER, on every successful fetch* 
+ * or apply* it gets set to DEVICE.
  * For local value storage `std::optional`s are used. fetch* will report true,
  * iff communication with the device succeeded - irrespective of the validity of
  * the retrieved value(s). give* will return false, iff the locally held values
