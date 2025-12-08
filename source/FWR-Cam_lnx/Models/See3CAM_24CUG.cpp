@@ -323,51 +323,51 @@ void See3CAM_24CUG::_uninitialize() {
     closeHIDFD();
     hidPath.clear();
     
-    effectModeSource = ssrc::NONE;
-    effectMode.reset();
-    
-    deNoiseValueSource = ssrc::NONE;
-    deNoiseValue.reset();
-    
-    autoExpoModeAndROISource = ssrc::NONE;
-    autoExpoMode.reset();
-    autoExpoROIxCoord.reset();
-    autoExpoROIyCoord.reset();
-    autoExpoROISize.reset();
-    
-    exposureCompensationSource = ssrc::NONE;
-    exposureCompensation.reset();
-    
-    burstLengthSource = ssrc::NONE;
-    burstLength.reset();
-    
-    qFactorSource = ssrc::NONE;
-    qFactor.reset();
-    
-    mirrorModeSource = ssrc::NONE;
-    mirrorMode.reset();
-    
-    framerateSource = ssrc::NONE;
-    framerate.reset();
-    
-    faceDetectModeSource = ssrc::NONE;
-    faceRectMode.reset();
-    faceEmbedMode.reset();
-    faceOverlayRectMode.reset();
-    
-    smileDetectModeSource = ssrc::NONE;
-    smileDetectMode.reset();
-    smileEmbedMode.reset();
-    
-    flickerDetectModeSource = ssrc::NONE;
-    flickerDetectMode.reset();
-    
-    flashModeSource = ssrc::NONE;
-    flashMode.reset();
-    
-    streamModeSource = ssrc::NONE;
-    streamMode.reset();
-    streamModeFunctionLock.reset();
+//     effectModeSource = ssrc::NONE;
+//     effectMode.reset();
+//     
+//     deNoiseValueSource = ssrc::NONE;
+//     deNoiseValue.reset();
+//     
+//     autoExpoModeAndROISource = ssrc::NONE;
+//     autoExpoMode.reset();
+//     autoExpoROIxCoord.reset();
+//     autoExpoROIyCoord.reset();
+//     autoExpoROISize.reset();
+//     
+//     exposureCompensationSource = ssrc::NONE;
+//     exposureCompensation.reset();
+//     
+//     burstLengthSource = ssrc::NONE;
+//     burstLength.reset();
+//     
+//     qFactorSource = ssrc::NONE;
+//     qFactor.reset();
+//     
+//     mirrorModeSource = ssrc::NONE;
+//     mirrorMode.reset();
+//     
+//     framerateSource = ssrc::NONE;
+//     framerate.reset();
+//     
+//     faceDetectModeSource = ssrc::NONE;
+//     faceRectMode.reset();
+//     faceEmbedMode.reset();
+//     faceOverlayRectMode.reset();
+//     
+//     smileDetectModeSource = ssrc::NONE;
+//     smileDetectMode.reset();
+//     smileEmbedMode.reset();
+//     
+//     flickerDetectModeSource = ssrc::NONE;
+//     flickerDetectMode.reset();
+//     
+//     flashModeSource = ssrc::NONE;
+//     flashMode.reset();
+//     
+//     streamModeSource = ssrc::NONE;
+//     streamMode.reset();
+//     streamModeFunctionLock.reset();
     
     initialized = false;
 }

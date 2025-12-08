@@ -953,7 +953,7 @@ bool V4L2Cam::fillBuffer(v4l2_buffer& buf) noexcept
     
     pollfd fds[2]{};
     fds[0].fd     = *fd_ptr;
-    fds[0].events = ( POLLIN | POLLERR | POLLHUP | POLLNVAL );
+    fds[0].events = ( POLLIN /*| POLLERR | POLLHUP | POLLNVAL*/ );
     
     if ( evntFD ) [[  likely]]
     {
@@ -1108,7 +1108,7 @@ bool V4L2Cam::wake() noexcept
        ) [[unlikely]]
     {
         clog << "V4L2Cam::wake: not in the correct state "
-                "(STREAMING|DEQUEUEING) to wake the one in fillBuffer()!"
+                "(STREAMING|DEQUEUEING) to find a thread to wake in fillBuffer()"
              << endl;
         
         return false;
@@ -1912,16 +1912,17 @@ void V4L2Cam::initializeSettings()
 
 void V4L2Cam::reapplySettings()
 {
-    applyResolutionAndPixelFormat();
-    applyBrightness();
-    applyContrast();
-    applySaturation();
-    applySharpness();
-    applyGamma();
-    applyWhiteBalance();
-    applyGain();
-    applyPowerLineFrequency();
-    applyExposure();
+    if (         resolutionSource != ssrc::NONE
+         ||           pixelSource != ssrc::NONE ) applyResolutionAndPixelFormat();
+    if (         brightnessSource != ssrc::NONE ) applyBrightness();
+    if (           contrastSource != ssrc::NONE ) applyContrast();
+    if (         saturationSource != ssrc::NONE ) applySaturation();
+    if (          sharpnessSource != ssrc::NONE ) applySharpness();
+    if (              gammaSource != ssrc::NONE ) applyGamma();
+    if (       whiteBalanceSource != ssrc::NONE ) applyWhiteBalance();
+    if (               gainSource != ssrc::NONE ) applyGain();
+    if ( powerLineFrequencySource != ssrc::NONE ) applyPowerLineFrequency();
+    if (           exposureSource != ssrc::NONE ) applyExposure();
 }
 
 // // only to be used by locateDeviceNodeAndInitialize()
@@ -2254,13 +2255,20 @@ void V4L2Cam::queryControlDomain( FD_t        const& fd
     {
         int const errNo = errno;
         
-        // Unsupported / not applicable / driver oddities: silently skip.
+        // Unsupported / not applicable / driver oddities: skip
         if ( errNo == EINVAL || errNo == EDOM )
+        {
+            clog << "V4L2Cam::queryControlDomain: VIDIOC_QUERYCTRL failed - for "
+                    "(probably) benign reason - for "
+                 << cidStr << ": " << strerror(errNo)
+                 << endl;
+            
             return;
+        }
         
         // Otherwise, real error worth logging (I/O, bad fd, etc.).
         clog << "V4L2Cam::queryControlDomain: VIDIOC_QUERYCTRL failed for "
-             << cidStr << ": " << strerror(errNo)
+             << cidStr << ": " << strerror(errNo) << "!"
              << endl;
         
         errno = errNo;

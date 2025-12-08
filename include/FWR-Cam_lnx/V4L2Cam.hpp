@@ -103,41 +103,41 @@ struct V4L2CamData
     static constexpr uint16_t FRAME_POLL_TIMEOUT = 3000; // ms
     
     // the `EXPECT_*`s mean, treat them as failures still, but not as errors
-    enum class XIOCTL_FLAGS   : uint8_t { NONE           = 0
-                                        , QUASI_BLOCKING = 1 << 0
-                                        , EXPECT_EINVAL  = 1 << 1
-                                        , EXPECT_EDOM    = 1 << 2
-                                        , EXPECT_ENOTTY  = 1 << 3
-                                        };
+    enum class XIOCTL_FLAGS : uint8_t { NONE           = 0
+                                      , QUASI_BLOCKING = 1 << 0
+                                      , EXPECT_EINVAL  = 1 << 1
+                                      , EXPECT_EDOM    = 1 << 2
+                                      , EXPECT_ENOTTY  = 1 << 3
+                                      };
     
     
-    enum class SettingSource  : uint8_t { NONE
-                                        , USER
-                                        , DEVICE
-                                        };
-    enum class State          : uint8_t { UNINITIALIZED
-                                        , DEVICE_KNOWN
-                                        , INITIALIZED
-                                        , BUFFER_QUEUE_PREPPED
-                                        , STREAMING
-                                        , DEQUEUEING
-                                        };
-    enum class ResetMeasure   : uint8_t { NONE
-                                        , USB_IFACE_REBIND
-                                        , USB_DEVFS_RESET
-                                        // , USB_PORT_RESET
-                                        , USB_PORT_POWER_CYCLE_REQUESTED
-                                        , USB_PORT_POWER_CYCLE
-                                        };
-    enum class MemoryType     : uint8_t { UNKNOWN
-                                        , MMAP    // NIY
-                                        , USERPTR
-                                        , DMABUF
-                                        };
-    enum class APIToUse       : uint8_t { UNKNOWN
-                                        , MULTI
-                                        , SINGLE
-                                        };
+    enum class SettingSource: uint8_t { NONE
+                                      , USER
+                                      , DEVICE
+                                      };
+    enum class State        : uint8_t { UNINITIALIZED
+                                      , DEVICE_KNOWN
+                                      , INITIALIZED
+                                      , BUFFER_QUEUE_PREPPED
+                                      , STREAMING
+                                      , DEQUEUEING
+                                      };
+    enum class ResetMeasure : uint8_t { NONE
+                                      , USB_IFACE_REBIND
+                                      , USB_DEVFS_RESET
+                                      // , USB_PORT_RESET
+                                      , USB_PORT_POWER_CYCLE_REQUESTED
+                                      , USB_PORT_POWER_CYCLE
+                                      };
+    enum class MemoryType   : uint8_t { UNKNOWN
+                                      , MMAP    // NIY
+                                      , USERPTR
+                                      , DMABUF
+                                      };
+    enum class APIToUse     : uint8_t { UNKNOWN
+                                      , MULTI
+                                      , SINGLE
+                                      };
     
     // file descriptor helper struct
     struct FD_t
