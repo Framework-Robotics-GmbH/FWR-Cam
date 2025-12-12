@@ -23,7 +23,7 @@
 #include <sys/eventfd.h>
 #include <linux/videodev2.h>
 
-#include <libusb-1.0/libusb.h>
+// #include <libusb-1.0/libusb.h>
 
 #include "FWR-Cam_lnx/util/SmallBitset.hpp"
 
@@ -33,6 +33,8 @@
 
 struct udev;
 struct udev_device;
+struct libusb_context;
+struct libusb_device_handle;
 
 
 namespace FWR::Cam_lnx
@@ -510,6 +512,10 @@ public:
     
     bool fetchResolutionAndPixelFormat();
     bool applyResolutionAndPixelFormat();
+    private:
+    void updateResNPixFmtFromDeviceInfo(v4l2_format const&) noexcept;
+    void  resetResNPixFmt              ()                   noexcept;
+    public:
     
     bool  giveMaxBufferSizeNeeded    (uint32_t & mbs);
     bool  giveCurrentBufferSizeNeeded(uint32_t & cbs);

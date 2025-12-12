@@ -240,19 +240,19 @@ void See3CAM_24CUG::initializeSettings() noexcept
 
 void See3CAM_24CUG::reapplySettings() noexcept
 {
-    applyEffectMode();
-    applyDeNoiseValue();
-    applyAutoExpoModeAndROI();
-    applyExposureCompensation();
-    applyBurstLength();
-    applyQFactor();
-    applyMirrorMode();
-    applyFramerate();
-    applyFaceDetectMode();
-    applySmileDetectMode();
-    applyFlickerDetectMode();
-    applyFlashMode();
-    applyStreamMode();
+    if (           effectModeSource == ssrc::DEVICE ) applyEffectMode();
+    if (         deNoiseValueSource == ssrc::DEVICE ) applyDeNoiseValue();
+    if (   autoExpoModeAndROISource == ssrc::DEVICE ) applyAutoExpoModeAndROI();
+    if ( exposureCompensationSource == ssrc::DEVICE ) applyExposureCompensation();
+    if (          burstLengthSource == ssrc::DEVICE ) applyBurstLength();
+    if (              qFactorSource == ssrc::DEVICE ) applyQFactor();
+    if (           mirrorModeSource == ssrc::DEVICE ) applyMirrorMode();
+    if (            framerateSource == ssrc::DEVICE ) applyFramerate();
+    if (       faceDetectModeSource == ssrc::DEVICE ) applyFaceDetectMode();
+    if (      smileDetectModeSource == ssrc::DEVICE ) applySmileDetectMode();
+    if (    flickerDetectModeSource == ssrc::DEVICE ) applyFlickerDetectMode();
+    if (            flashModeSource == ssrc::DEVICE ) applyFlashMode();
+    if (           streamModeSource == ssrc::DEVICE ) applyStreamMode();
 }
 
 
@@ -737,28 +737,31 @@ bool See3CAM_24CUG::fetchEffectMode()
     
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
     g_out_packet_buf[2] = GET_SPECIALEFFECT_24CUG;
-    
-    effectModeSource = ssrc::DEVICE;
 
-    if (    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
-         && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
-         && g_in_packet_buf[1] == GET_SPECIALEFFECT_24CUG
-         && g_in_packet_buf[6] == GET_SUCCESS
-       )
-    {
+    bool fetched =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+                   && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
+                   && g_in_packet_buf[1] == GET_SPECIALEFFECT_24CUG
+                   && g_in_packet_buf[6] == GET_SUCCESS;
+    
+    if ( fetched ) [[  likely]]
         effectMode = enum_cast<EffectMode>(g_in_packet_buf[2]);
-        
-        return true;
-    } else {
+    else
         effectMode.reset();
-        
-        return false;
-    }
+    
+    if ( effectMode ) effectModeSource = ssrc::DEVICE;
+    else              effectModeSource = ssrc::NONE;
+    
+    if ( fetched && !effectMode ) [[unlikely]]
+        clog << "See3CAM_24CUG::fetchEffectMode: value reported by device not valid "
+                "according to our domain knowledge!"
+             << endl;
+    
+    return effectModeSource == ssrc::DEVICE;
 }
 
 bool See3CAM_24CUG::applyEffectMode()
 {
-    if ( !effectMode.has_value() )
+    if ( effectModeSource == ssrc::NONE || !effectMode.has_value() )
         return false;
     
     initializeBuffers();
@@ -767,14 +770,23 @@ bool See3CAM_24CUG::applyEffectMode()
     g_out_packet_buf[2] = SET_SPECIALEFFECT_24CUG;
     g_out_packet_buf[3] = enum_integer(effectMode.value());
     
-    if (    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
-         && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
-         && g_in_packet_buf[1] == SET_SPECIALEFFECT_24CUG
-         && g_in_packet_buf[6] == SET_SUCCESS
-       )
-        return true;
-    else
+    bool applied =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+                   && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
+                   && g_in_packet_buf[1] == SET_SPECIALEFFECT_24CUG
+                   && g_in_packet_buf[6] == SET_SUCCESS;  
+    
+    if ( !applied ) [[unlikely]]
+    {
+        effectMode.reset();
+        effectModeSource = ssrc::NONE;
+        
+        clog << "V4L2Cam::applyEffectMode: ioctl failed!"
+             << endl;
+        
         return false;
+    }
+    else
+        return fetchEffectMode();
 }
 
 
@@ -824,29 +836,30 @@ bool See3CAM_24CUG::fetchDeNoiseValue()
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
     g_out_packet_buf[2] = GET_DENOISE_24CUG;
     
-    deNoiseValueSource = ssrc::DEVICE;
+    bool fetched =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+                   && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
+                   && g_in_packet_buf[1] == GET_DENOISE_24CUG
+                   && g_in_packet_buf[6] == GET_SUCCESS;
     
-    if (    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
-         && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
-         && g_in_packet_buf[1] == GET_DENOISE_24CUG
-         && g_in_packet_buf[6] == GET_SUCCESS
-       )
-    {
-        deNoiseValue = g_in_packet_buf[2];
-        if ( !checkDeNoiseValue() )
-            deNoiseValue.reset();
-        
-        return true;
-    } else {
-        deNoiseValue.reset();
-        
-        return false;
-    }
+    if ( fetched ) { deNoiseValue       = (decltype(deNoiseValue)::value_type)
+                                          (g_in_packet_buf[2]);
+                     deNoiseValueSource = ssrc::DEVICE;
+                   }
+    else           { deNoiseValue.reset();
+                     deNoiseValueSource = ssrc::NONE;
+                   }
+    
+    if ( fetched && !checkDeNoiseValue() ) [[unlikely]]
+        clog << "See3CAM_24CUG::fetchDeNoiseValue: value reported by device not "
+                "valid according to our domain knowledge!"
+             << endl;
+    
+    return deNoiseValueSource == ssrc::DEVICE;
 }
 
 bool See3CAM_24CUG::applyDeNoiseValue()
 {
-    if ( !checkDeNoiseValue() )
+    if ( deNoiseValueSource == ssrc::NONE || !checkDeNoiseValue() )
         return false;
     
     initializeBuffers();
@@ -855,14 +868,23 @@ bool See3CAM_24CUG::applyDeNoiseValue()
     g_out_packet_buf[2] = SET_DENOISE_24CUG;
     g_out_packet_buf[3] = deNoiseValue.value();
     
-    if (    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
-         && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
-         && g_in_packet_buf[1] == SET_DENOISE_24CUG
-         && g_in_packet_buf[6] == SET_SUCCESS
-       )
-        return true;
-    else
+    bool applied =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+                   && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
+                   && g_in_packet_buf[1] == SET_DENOISE_24CUG
+                   && g_in_packet_buf[6] == SET_SUCCESS;
+    
+    if ( !applied ) [[unlikely]]
+    {
+        deNoiseValue.reset();
+        deNoiseValueSource = ssrc::NONE;
+        
+        clog << "V4L2Cam::applyDeNoiseValue: ioctl failed!"
+             << endl;
+        
         return false;
+    }
+    else
+        return fetchDeNoiseValue();
 }
 
 
@@ -968,7 +990,8 @@ bool See3CAM_24CUG::takeAutoExpoModeAndROI( uint8_t  const _autoExpoMode
     if ( !mode.has_value() ) [[unlikely]]
         return false;
     
-    if ( mode.value() != AutoExpoMode::MANUAL ) {
+    if ( mode.value() != AutoExpoMode::MANUAL )
+    {
         autoExpoMode     = mode;
         autoExpoROIxCoord.reset();
         autoExpoROIyCoord.reset();
@@ -1023,13 +1046,7 @@ bool See3CAM_24CUG::checkAutoExpoModeAndROI()
         return false;
     
     if ( autoExpoMode.value() != AutoExpoMode::MANUAL )
-    {
-        autoExpoROIyCoord.reset();
-        autoExpoROISize  .reset();
-        autoExpoROIxCoord.reset();
-        
         return true;
-    }
     
     if (    !autoExpoROIxCoord.has_value()
          || !autoExpoROIyCoord.has_value()
@@ -1048,43 +1065,44 @@ bool See3CAM_24CUG::fetchAutoExpoModeAndROI()
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
     g_out_packet_buf[2] = GET_EXP_ROI_MODE_24CUG;
     
-    autoExpoModeAndROISource = ssrc::DEVICE;
+    bool fetched =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+                   && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
+                   && g_in_packet_buf[1] == GET_EXP_ROI_MODE_24CUG
+                   && g_in_packet_buf[6] == GET_SUCCESS;
     
-    if (    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
-         && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
-         && g_in_packet_buf[1] == GET_EXP_ROI_MODE_24CUG
-         && g_in_packet_buf[6] == GET_SUCCESS
-       )
-    {
-        // HACK not tested, if the cam actually returns the coords
-        // (weren't read from the buffer in e-con's example code)
-        // TODO someone test it
-        autoExpoMode      = enum_cast<AutoExpoMode>(g_in_packet_buf[2]);
-        autoExpoROIxCoord = g_in_packet_buf[3];
-        autoExpoROIyCoord = g_in_packet_buf[4];
-        autoExpoROISize   = g_in_packet_buf[5];
-        if ( !checkAutoExpoModeAndROI() )
-        {
-            autoExpoMode     .reset();
-            autoExpoROIxCoord.reset();
-            autoExpoROIyCoord.reset();
-            autoExpoROISize  .reset();
-        }
-        
-        return true;
-    } else {
-        autoExpoMode     .reset();
-        autoExpoROIxCoord.reset();
-        autoExpoROIyCoord.reset();
-        autoExpoROISize  .reset();
-        
-        return false;
-    }
+    if ( fetched ) [[  likely]]
+        autoExpoMode = enum_cast<AutoExpoMode>(g_in_packet_buf[2]);
+    else
+        autoExpoMode.reset();
+    
+    if ( autoExpoMode ) { // HACK not tested, if the cam actually returns the coords
+                          // (weren't read from the buffer in e-con's example code)
+                          // TODO someone test it
+                          autoExpoROIxCoord = (decltype(autoExpoROIxCoord)::value_type)
+                                              (g_in_packet_buf[3]);
+                          autoExpoROIyCoord = (decltype(autoExpoROIyCoord)::value_type)
+                                              (g_in_packet_buf[4]);
+                          autoExpoROISize   = (decltype(autoExpoROISize  )::value_type)
+                                              (g_in_packet_buf[5]);
+                          autoExpoModeAndROISource = ssrc::DEVICE;
+                        }
+    else                { autoExpoROIxCoord.reset();
+                          autoExpoROIyCoord.reset();
+                          autoExpoROISize  .reset();
+                          autoExpoModeAndROISource = ssrc::NONE;
+                        }
+    
+    if ( fetched && !checkAutoExpoModeAndROI() ) [[unlikely]]
+        clog << "See3CAM_24CUG::fetchAutoExpoModeAndROI: values reported by "
+                "device not valid according to our domain knowledge!"
+             << endl;
+    
+    return autoExpoModeAndROISource == ssrc::DEVICE;
 }
 
 bool See3CAM_24CUG::applyAutoExpoModeAndROI()
 {
-    if ( !checkAutoExpoModeAndROI() )
+    if ( autoExpoModeAndROISource == ssrc::NONE || !checkAutoExpoModeAndROI() )
         return false;
     
     initializeBuffers();
@@ -1100,14 +1118,26 @@ bool See3CAM_24CUG::applyAutoExpoModeAndROI()
         g_out_packet_buf[6] = autoExpoROISize  .value();
     }
     
-    if (    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
-         && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
-         && g_in_packet_buf[1] == SET_EXP_ROI_MODE_24CUG
-         && g_in_packet_buf[6] == SET_SUCCESS
-       )
-        return true;
-    else
+    bool applied =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+                   && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
+                   && g_in_packet_buf[1] == SET_EXP_ROI_MODE_24CUG
+                   && g_in_packet_buf[6] == SET_SUCCESS;
+    
+    if ( !applied ) [[unlikely]]
+    {
+        autoExpoMode     .reset();
+        autoExpoROIxCoord.reset();
+        autoExpoROIyCoord.reset();
+        autoExpoROISize  .reset();
+        autoExpoModeAndROISource = ssrc::NONE;
+        
+        clog << "V4L2Cam::applyAutoExpoModeAndROI: ioctl failed!"
+             << endl;
+        
         return false;
+    }
+    else
+        return fetchAutoExpoModeAndROI();
 }
 
 
@@ -1157,32 +1187,34 @@ bool See3CAM_24CUG::fetchExposureCompensation()
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
     g_out_packet_buf[2] = GET_EXPOSURE_COMPENSATION_24CUG;
     
-    exposureCompensationSource = ssrc::DEVICE;
+    bool fetched =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+                   && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG 
+                   && g_in_packet_buf[1] == GET_EXPOSURE_COMPENSATION_24CUG 
+                   && g_in_packet_buf[6] == GET_SUCCESS;
     
-    if (    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
-         && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG 
-         && g_in_packet_buf[1] == GET_EXPOSURE_COMPENSATION_24CUG 
-         && g_in_packet_buf[6] == GET_SUCCESS
-       )
-    {
-        exposureCompensation = (((uint32_t)g_in_packet_buf[2]) << 24)
-                             | (((uint32_t)g_in_packet_buf[3]) << 16)
-                             | (((uint32_t)g_in_packet_buf[4]) <<  8)
-                             | (((uint32_t)g_in_packet_buf[5]) <<  0);
-        if ( !checkExposureCompensation() )
-            exposureCompensation.reset();
-        
-        return true;
-    } else {
-        exposureCompensation.reset();
-        
-        return false;
-    }
+    if ( fetched ) { exposureCompensation = (decltype(exposureCompensation)::value_type)
+                                            (   (((uint32_t)g_in_packet_buf[2]) << 24)
+                                              | (((uint32_t)g_in_packet_buf[3]) << 16)
+                                              | (((uint32_t)g_in_packet_buf[4]) <<  8)
+                                              | (((uint32_t)g_in_packet_buf[5]) <<  0)
+                                            );
+                     exposureCompensationSource = ssrc::DEVICE;
+                   }
+    else           { exposureCompensation.reset();
+                     exposureCompensationSource = ssrc::NONE;
+                   }
+    
+    if ( fetched && !checkExposureCompensation() ) [[unlikely]]
+        clog << "See3CAM_24CUG::fetchExposureCompensation: value reported by "
+                "device not valid according to our domain knowledge!"
+             << endl;
+    
+    return exposureCompensationSource == ssrc::DEVICE;
 }
 
 bool See3CAM_24CUG::applyExposureCompensation()
 {
-    if ( !checkExposureCompensation() )
+    if ( exposureCompensationSource == ssrc::NONE || !checkExposureCompensation() )
         return false;
     
     initializeBuffers();
@@ -1194,14 +1226,23 @@ bool See3CAM_24CUG::applyExposureCompensation()
     g_out_packet_buf[5] = (uint8_t)((exposureCompensation.value() >>  8) & 0xFF);
     g_out_packet_buf[6] = (uint8_t)((exposureCompensation.value() >>  0) & 0xFF);
     
-    if (    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
-         && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
-         && g_in_packet_buf[1] == SET_EXPOSURE_COMPENSATION_24CUG
-         && g_in_packet_buf[6] == SET_SUCCESS
-       )
-        return true;
-    else
+    bool applied =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+                   && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
+                   && g_in_packet_buf[1] == SET_EXPOSURE_COMPENSATION_24CUG
+                   && g_in_packet_buf[6] == SET_SUCCESS;
+    
+    if ( !applied ) [[unlikely]]
+    {
+        exposureCompensation.reset();
+        exposureCompensationSource = ssrc::NONE;
+        
+        clog << "V4L2Cam::applyExposureCompensation: ioctl failed!"
+             << endl;
+        
         return false;
+    }
+    else
+        return fetchExposureCompensation();
 }
 
 
@@ -1242,27 +1283,25 @@ bool See3CAM_24CUG::fetchBurstLength()
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
     g_out_packet_buf[2] = GET_BURST_LENGTH_24CUG;
     
-    burstLengthSource = ssrc::DEVICE;
+    bool fetched =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+                   && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
+                   && g_in_packet_buf[1] == GET_BURST_LENGTH_24CUG
+                   && g_in_packet_buf[6] == GET_SUCCESS;
     
-    if (    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
-         && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
-         && g_in_packet_buf[1] == GET_BURST_LENGTH_24CUG
-         && g_in_packet_buf[6] == GET_SUCCESS
-       )
-    {
-        burstLength = g_in_packet_buf[2];
-        
-        return true;
-    } else {
-        burstLength.reset();
-        
-        return false;
-    }
+    if ( fetched ) { burstLength       = (decltype(burstLength)::value_type)
+                                         (g_in_packet_buf[2]);
+                     burstLengthSource = ssrc::DEVICE;
+                   }
+    else           { burstLength.reset();
+                     burstLengthSource = ssrc::NONE;
+                   }
+    
+    return burstLengthSource == ssrc::DEVICE;
 }
 
 bool See3CAM_24CUG::applyBurstLength()
 {
-    if ( !burstLength.has_value() )
+    if ( burstLengthSource == ssrc::NONE || !burstLength.has_value() )
         return false;
     
     initializeBuffers();
@@ -1271,14 +1310,23 @@ bool See3CAM_24CUG::applyBurstLength()
     g_out_packet_buf[2] = SET_BURST_LENGTH_24CUG;
     g_out_packet_buf[3] = burstLength.value();
     
-    if (    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
-         && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
-         && g_in_packet_buf[1] == SET_BURST_LENGTH_24CUG
-         && g_in_packet_buf[6] == SET_SUCCESS
-       )
-        return true;
-    else
+    bool applied =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+                   && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
+                   && g_in_packet_buf[1] == SET_BURST_LENGTH_24CUG
+                   && g_in_packet_buf[6] == SET_SUCCESS;
+    
+    if ( !applied ) [[unlikely]]
+    {
+        burstLength.reset();
+        burstLengthSource = ssrc::NONE;
+        
+        clog << "V4L2Cam::applyBurstLength: ioctl failed!"
+             << endl;
+        
         return false;
+    }
+    else
+        return fetchBurstLength();
 }
 
 
@@ -1328,29 +1376,30 @@ bool See3CAM_24CUG::fetchQFactor()
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
     g_out_packet_buf[2] = GET_Q_FACTOR_24CUG;
     
-    qFactorSource = ssrc::DEVICE;
+    bool fetched =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+                   && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
+                   && g_in_packet_buf[1] == GET_Q_FACTOR_24CUG
+                   && g_in_packet_buf[6] == SET_SUCCESS;
     
-    if (    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
-         && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
-         && g_in_packet_buf[1] == GET_Q_FACTOR_24CUG
-         && g_in_packet_buf[6] == SET_SUCCESS
-       )
-    {
-        qFactor = g_in_packet_buf[2];
-        if ( !checkQFactor() )
-            qFactor.reset();
-        
-        return true;
-    } else {
-        qFactor.reset();
-        
-        return false;
-    }
+    if ( fetched ) { qFactor       = (decltype(qFactor)::value_type)
+                                     (g_in_packet_buf[2]);
+                     qFactorSource = ssrc::DEVICE;
+                   }
+    else           { qFactor.reset();
+                     qFactorSource = ssrc::NONE;
+                   }
+    
+    if ( fetched && !checkQFactor() ) [[unlikely]]
+        clog << "See3CAM_24CUG::fetchQFactor: value reported by device not "
+                "valid according to our domain knowledge!"
+             << endl;
+    
+    return qFactorSource == ssrc::DEVICE;
 }
 
 bool See3CAM_24CUG::applyQFactor()
 {
-    if ( !checkQFactor() )
+    if ( qFactorSource == ssrc::NONE || !checkQFactor() )
         return false;
     
     initializeBuffers();
@@ -1359,14 +1408,23 @@ bool See3CAM_24CUG::applyQFactor()
     g_out_packet_buf[2] = SET_Q_FACTOR_24CUG;
     g_out_packet_buf[3] = qFactor.value();
     
-    if (    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
-         && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
-         && g_in_packet_buf[1] == SET_Q_FACTOR_24CUG
-         && g_in_packet_buf[6] == SET_SUCCESS
-       )
-        return true;
-    else
+    bool applied =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+                   && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
+                   && g_in_packet_buf[1] == SET_Q_FACTOR_24CUG
+                   && g_in_packet_buf[6] == SET_SUCCESS;
+    
+    if ( !applied ) [[unlikely]]
+    {
+        qFactor.reset();
+        qFactorSource = ssrc::NONE;
+        
+        clog << "V4L2Cam::applyQFactor: ioctl failed!"
+             << endl;
+        
         return false;
+    }
+    else
+        return fetchQFactor();
 }
 
 
@@ -1418,27 +1476,30 @@ bool See3CAM_24CUG::fetchMirrorMode()
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
     g_out_packet_buf[2] = GET_FLIP_MODE_24CUG;
     
-    mirrorModeSource = ssrc::DEVICE;
+    bool fetched =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+                   && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
+                   && g_in_packet_buf[1] == GET_FLIP_MODE_24CUG
+                   && g_in_packet_buf[6] == GET_SUCCESS;
     
-    if (    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
-         && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
-         && g_in_packet_buf[1] == GET_FLIP_MODE_24CUG
-         && g_in_packet_buf[6] == GET_SUCCESS
-       )
-    {
+    if ( fetched ) [[  likely]]
         mirrorMode = enum_cast<MirrorMode>(g_in_packet_buf[2]);
-        
-        return true;
-    } else {
+    else
         mirrorMode.reset();
-        
-        return false;
-    }
+    
+    if ( mirrorMode ) mirrorModeSource = ssrc::DEVICE;
+    else              mirrorModeSource = ssrc::NONE;
+    
+    if ( fetched && !mirrorMode ) [[unlikely]]
+        clog << "See3CAM_24CUG::fetchMirrorMode: value reported by device not valid "
+                "according to our domain knowledge!"
+             << endl;
+    
+    return mirrorModeSource == ssrc::DEVICE;
 }
 
 bool See3CAM_24CUG::applyMirrorMode()
 {
-    if ( !mirrorMode.has_value() )
+    if ( mirrorModeSource == ssrc::NONE || !mirrorMode.has_value() )
         return false;
     
     initializeBuffers();
@@ -1447,14 +1508,23 @@ bool See3CAM_24CUG::applyMirrorMode()
     g_out_packet_buf[2] = SET_FLIP_MODE_24CUG;
     g_out_packet_buf[3] = enum_integer(mirrorMode.value());
     
-    if (    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
-         && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
-         && g_in_packet_buf[1] == SET_FLIP_MODE_24CUG
-         && g_in_packet_buf[6] == SET_SUCCESS
-       )
-        return true;
-    else
+    bool applied =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+                   && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
+                   && g_in_packet_buf[1] == SET_FLIP_MODE_24CUG
+                   && g_in_packet_buf[6] == SET_SUCCESS;
+    
+    if ( !applied ) [[unlikely]]
+    {
+        mirrorMode.reset();
+        mirrorModeSource = ssrc::NONE;
+        
+        clog << "V4L2Cam::applyMirrorMode: ioctl failed!"
+             << endl;
+        
         return false;
+    }
+    else
+        return fetchMirrorMode();
 }
 
 
@@ -1504,29 +1574,30 @@ bool See3CAM_24CUG::fetchFramerate()
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
     g_out_packet_buf[2] = GET_FRAME_RATE_24CUG;
     
-    framerateSource = ssrc::DEVICE;
+    bool fetched =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+                   && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
+                   && g_in_packet_buf[1] == GET_FRAME_RATE_24CUG
+                   && g_in_packet_buf[6] == GET_SUCCESS;
     
-    if (    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
-         && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
-         && g_in_packet_buf[1] == GET_FRAME_RATE_24CUG
-         && g_in_packet_buf[6] == GET_SUCCESS
-       )
-    {
-        framerate = g_in_packet_buf[2];
-        if ( !checkFramerate() )
-            framerate.reset();
-        
-        return true;
-    } else {
-        framerate.reset();
-        
-        return false;
-    }
+    if ( fetched ) { framerate       = (decltype(framerate)::value_type)
+                                       (g_in_packet_buf[2]);
+                     framerateSource = ssrc::DEVICE;
+                   }
+    else           { framerate.reset();
+                     framerateSource = ssrc::NONE;
+                   }
+    
+    if ( fetched && !checkFramerate() ) [[unlikely]]
+        clog << "See3CAM_24CUG::fetchFramerate: value reported by device not "
+                "valid according to our domain knowledge!"
+             << endl;
+    
+    return framerateSource == ssrc::DEVICE;
 }
 
 bool See3CAM_24CUG::applyFramerate()
 {
-    if ( !checkFramerate() )
+    if ( framerateSource == ssrc::NONE || !checkFramerate() )
         return false;
     
     initializeBuffers();
@@ -1535,14 +1606,23 @@ bool See3CAM_24CUG::applyFramerate()
     g_out_packet_buf[2] = SET_FRAME_RATE_24CUG;
     g_out_packet_buf[3] = framerate.value();
     
-    if (    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
-         && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
-         && g_in_packet_buf[1] == SET_FRAME_RATE_24CUG
-         && g_in_packet_buf[6] == SET_SUCCESS
-       )
-        return true;
-    else
+    bool applied =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+                   && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
+                   && g_in_packet_buf[1] == SET_FRAME_RATE_24CUG
+                   && g_in_packet_buf[6] == SET_SUCCESS;
+    
+    if ( !applied ) [[unlikely]]
+    {
+        framerate.reset();
+        framerateSource = ssrc::NONE;
+        
+        clog << "V4L2Cam::applyFramerate: ioctl failed!"
+             << endl;
+        
         return false;
+    }
+    else
+        return fetchFramerate();
 }
 
 
@@ -1591,19 +1671,9 @@ bool See3CAM_24CUG::takeFaceDetectMode( bool const _faceDetect
 
 bool See3CAM_24CUG::checkFaceDetectMode()
 {
-    if (    !faceRectMode       .has_value()
-         || !faceEmbedMode      .has_value()
-         || !faceOverlayRectMode.has_value()
-       )
-    {
-        faceRectMode       .reset();
-        faceEmbedMode      .reset();
-        faceOverlayRectMode.reset();
-        
-        return false;
-    }
-    
-    return true;
+    return    faceRectMode       .has_value()
+           && faceEmbedMode      .has_value()
+           && faceOverlayRectMode.has_value();
 }
 
 bool See3CAM_24CUG::fetchFaceDetectMode()
@@ -1613,32 +1683,39 @@ bool See3CAM_24CUG::fetchFaceDetectMode()
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
     g_out_packet_buf[2] = GET_FACE_DETECT_RECT_24CUG;
     
-    faceDetectModeSource = ssrc::DEVICE;
+    bool fetched =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+                   && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
+                   && g_in_packet_buf[1] == GET_FACE_DETECT_RECT_24CUG
+                   && g_in_packet_buf[6] == GET_SUCCESS;
     
-    if (    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
-         && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
-         && g_in_packet_buf[1] == GET_FACE_DETECT_RECT_24CUG
-         && g_in_packet_buf[6] == GET_SUCCESS
-       )
+    if ( fetched ) [[  likely]]
     {
         faceRectMode        = enum_cast<FaceRectMode       >(g_in_packet_buf[2]);
         faceEmbedMode       = enum_cast<FaceEmbedMode      >(g_in_packet_buf[3]);
         faceOverlayRectMode = enum_cast<FaceOverlayRectMode>(g_in_packet_buf[4]);
-        checkFaceDetectMode();
-        
-        return true;
-    } else {
+    }
+    
+    if ( !fetched || !checkFaceDetectMode() )
+    {
         faceRectMode       .reset();
         faceEmbedMode      .reset();
         faceOverlayRectMode.reset();
-        
-        return false;
     }
+    
+    if ( checkFaceDetectMode() ) faceDetectModeSource = ssrc::DEVICE;
+    else                         faceDetectModeSource = ssrc::NONE;
+    
+    if ( fetched && !checkFaceDetectMode() ) [[unlikely]]
+        clog << "See3CAM_24CUG::fetchFaceDetectMode: values reported by device "
+                "not valid according to our domain knowledge!"
+             << endl;
+    
+    return faceDetectModeSource == ssrc::DEVICE;
 }
 
 bool See3CAM_24CUG::applyFaceDetectMode()
 {
-    if ( !checkFaceDetectMode() )
+    if ( faceDetectModeSource == ssrc::NONE || !checkFaceDetectMode() )
         return false;
     
     initializeBuffers();
@@ -1649,14 +1726,25 @@ bool See3CAM_24CUG::applyFaceDetectMode()
     g_out_packet_buf[4] = enum_integer(faceEmbedMode      .value());
     g_out_packet_buf[5] = enum_integer(faceOverlayRectMode.value());
     
-    if (    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
-         && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
-         && g_in_packet_buf[1] == SET_FACE_DETECT_RECT_24CUG
-         && g_in_packet_buf[6] == SET_SUCCESS
-       )
-        return true;
-    else
+    bool applied =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+                   && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
+                   && g_in_packet_buf[1] == SET_FACE_DETECT_RECT_24CUG
+                   && g_in_packet_buf[6] == SET_SUCCESS;
+    
+    if ( !applied ) [[unlikely]]
+    {
+        faceRectMode       .reset();
+        faceEmbedMode      .reset();
+        faceOverlayRectMode.reset();
+        faceDetectModeSource = ssrc::NONE;
+        
+        clog << "V4L2Cam::applyFaceDetectMode: ioctl failed!"
+             << endl;
+        
         return false;
+    }
+    else
+        return fetchFaceDetectMode();
 }
 
 
@@ -1699,17 +1787,8 @@ bool See3CAM_24CUG::takeSmileDetectMode( bool const _smileDetect
 
 bool See3CAM_24CUG::checkSmileDetectMode()
 {
-    if (    !smileDetectMode.has_value()
-         || !smileEmbedMode .has_value()
-       )
-    {
-        smileDetectMode.reset();
-        smileEmbedMode .reset();
-        
-        return false;
-    }
-    
-    return true;
+    return    smileDetectMode.has_value()
+           && smileEmbedMode .has_value();
 }
 
 bool See3CAM_24CUG::fetchSmileDetectMode()
@@ -1719,30 +1798,37 @@ bool See3CAM_24CUG::fetchSmileDetectMode()
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
     g_out_packet_buf[2] = GET_SMILE_DETECTION;
     
-    smileDetectModeSource = ssrc::DEVICE;
+    bool fetched =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+                   && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
+                   && g_in_packet_buf[1] == GET_SMILE_DETECTION
+                   && g_in_packet_buf[6] == GET_SUCCESS;
     
-    if (    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
-         && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
-         && g_in_packet_buf[1] == GET_SMILE_DETECTION
-         && g_in_packet_buf[6] == GET_SUCCESS
-       )
+    if ( fetched ) [[  likely]]
     {
         smileDetectMode = enum_cast<SmileDetectMode>(g_in_packet_buf[2]);
         smileEmbedMode  = enum_cast<SmileEmbedMode >(g_in_packet_buf[4]);
-        checkSmileDetectMode();
-        
-        return true;
-    } else {
+    }
+    
+    if ( !fetched || !checkSmileDetectMode() )
+    {
         smileDetectMode.reset();
         smileEmbedMode .reset();
-        
-        return false;
     }
+    
+    if ( checkSmileDetectMode() ) smileDetectModeSource = ssrc::DEVICE;
+    else                          smileDetectModeSource = ssrc::NONE;
+    
+    if ( fetched && !checkSmileDetectMode() ) [[unlikely]]
+        clog << "See3CAM_24CUG::fetchSmileDetectMode: values reported by device "
+                "not valid according to our domain knowledge!"
+             << endl;
+    
+    return smileDetectModeSource == ssrc::DEVICE;
 }
 
 bool See3CAM_24CUG::applySmileDetectMode()
 {
-    if ( !checkSmileDetectMode() )
+    if ( smileDetectModeSource == ssrc::NONE || !checkSmileDetectMode() )
         return false;
     
     initializeBuffers();
@@ -1752,14 +1838,24 @@ bool See3CAM_24CUG::applySmileDetectMode()
     g_out_packet_buf[3] = enum_integer(smileDetectMode.value());
     g_out_packet_buf[5] = enum_integer(smileEmbedMode .value());
     
-    if (    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
-         && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
-         && g_in_packet_buf[1] == SET_SMILE_DETECTION
-         && g_in_packet_buf[6] == SET_SUCCESS
-       )
-        return true;
-    else
+    bool applied =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+                   && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
+                   && g_in_packet_buf[1] == SET_SMILE_DETECTION
+                   && g_in_packet_buf[6] == SET_SUCCESS;
+    
+    if ( !applied ) [[unlikely]]
+    {
+        smileDetectMode.reset();
+        smileEmbedMode .reset();
+        smileDetectModeSource = ssrc::NONE;
+        
+        clog << "V4L2Cam::applySmileDetectMode: ioctl failed!"
+             << endl;
+        
         return false;
+    }
+    else
+        return fetchSmileDetectMode();
 }
 
 
@@ -1804,27 +1900,30 @@ bool See3CAM_24CUG::fetchFlickerDetectMode()
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
     g_out_packet_buf[2] = GET_FLICKER_CONRTOL_24CUG;
     
-    flickerDetectModeSource = ssrc::DEVICE;
+    bool fetched =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+                   && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
+                   && g_in_packet_buf[1] == GET_FLICKER_CONRTOL_24CUG
+                   && g_in_packet_buf[6] == GET_SUCCESS;
     
-    if (    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
-         && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
-         && g_in_packet_buf[1] == GET_FLICKER_CONRTOL_24CUG
-         && g_in_packet_buf[6] == GET_SUCCESS
-       )
-    {
+    if ( fetched ) [[  likely]]
         flickerDetectMode = enum_cast<FlickerDetectMode>(g_in_packet_buf[2]);
-        
-        return true;
-    } else {
+    else
         flickerDetectMode.reset();
-        
-        return false;
-    }
+    
+    if ( flickerDetectMode ) flickerDetectModeSource = ssrc::DEVICE;
+    else                     flickerDetectModeSource = ssrc::NONE;
+    
+    if ( fetched && !flickerDetectMode ) [[unlikely]]
+        clog << "See3CAM_24CUG::fetchFlickerDetectMode: value reported by device "
+                "not valid according to our domain knowledge!"
+             << endl;
+    
+    return flickerDetectModeSource == ssrc::DEVICE;
 }
 
 bool See3CAM_24CUG::applyFlickerDetectMode()
 {
-    if ( !flickerDetectMode.has_value() )
+    if ( flickerDetectModeSource == ssrc::NONE || !flickerDetectMode.has_value() )
         return false;
     
     initializeBuffers();
@@ -1833,14 +1932,23 @@ bool See3CAM_24CUG::applyFlickerDetectMode()
     g_out_packet_buf[2] = SET_FLICKER_CONTROL_24CUG;
     g_out_packet_buf[3] = enum_integer(flickerDetectMode.value());
     
-    if (    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
-         && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
-         && g_in_packet_buf[1] == SET_FLICKER_CONTROL_24CUG
-         && g_in_packet_buf[6] == SET_SUCCESS
-       )
-        return true;
-    else
+    bool applied =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+                   && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
+                   && g_in_packet_buf[1] == SET_FLICKER_CONTROL_24CUG
+                   && g_in_packet_buf[6] == SET_SUCCESS;
+    
+    if ( !applied ) [[unlikely]]
+    {
+        flickerDetectMode.reset();
+        flickerDetectModeSource = ssrc::NONE;
+        
+        clog << "V4L2Cam::applyFlickerDetectMode: ioctl failed!"
+             << endl;
+        
         return false;
+    }
+    else
+        return fetchFlickerDetectMode();
 }
 
 
@@ -1885,27 +1993,30 @@ bool See3CAM_24CUG::fetchFlashMode()
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
     g_out_packet_buf[2] = GET_STROBE_CONTROL_24CUG;
     
-    flashModeSource = ssrc::DEVICE;
+    bool fetched =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+                   && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
+                   && g_in_packet_buf[1] == GET_STROBE_CONTROL_24CUG
+                   && g_in_packet_buf[6] == GET_SUCCESS;
     
-    if (    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
-         && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
-         && g_in_packet_buf[1] == GET_STROBE_CONTROL_24CUG
-         && g_in_packet_buf[6] == GET_SUCCESS
-       )
-    {
+    if ( fetched ) [[  likely]]
         flashMode = enum_cast<FlashMode>(g_in_packet_buf[2]);
-        
-        return true;
-    } else {
+    else
         flashMode.reset();
-        
-        return false;
-    }
+    
+    if ( flashMode ) flashModeSource = ssrc::DEVICE;
+    else             flashModeSource = ssrc::NONE;
+    
+    if ( fetched && !flashMode ) [[unlikely]]
+        clog << "See3CAM_24CUG::fetchFlashMode: value reported by device not valid "
+                "according to our domain knowledge!"
+             << endl;
+    
+    return flashModeSource == ssrc::DEVICE;
 }
 
 bool See3CAM_24CUG::applyFlashMode()
 {
-    if ( !flashMode.has_value() )
+    if ( flashModeSource == ssrc::NONE || !flashMode.has_value() )
         return false;
     
     initializeBuffers();
@@ -1914,14 +2025,23 @@ bool See3CAM_24CUG::applyFlashMode()
     g_out_packet_buf[2] = SET_STROBE_CONTROL_24CUG;
     g_out_packet_buf[3] = enum_integer(flashMode.value());
     
-    if (    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
-         && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
-         && g_in_packet_buf[1] == SET_STROBE_CONTROL_24CUG
-         && g_in_packet_buf[6] == SET_SUCCESS
-       )
-        return true;
-    else
+    bool applied =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+                   && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
+                   && g_in_packet_buf[1] == SET_STROBE_CONTROL_24CUG
+                   && g_in_packet_buf[6] == SET_SUCCESS;
+    
+    if ( !applied ) [[unlikely]]
+    {
+        flashMode.reset();
+        flashModeSource = ssrc::NONE;
+        
+        clog << "V4L2Cam::applyFlashMode: ioctl failed!"
+             << endl;
+        
         return false;
+    }
+    else
+        return fetchFlashMode();
 }
 
 
@@ -1965,17 +2085,8 @@ bool See3CAM_24CUG::takeStreamMode( uint8_t const _streamMode
 
 bool See3CAM_24CUG::checkStreamMode()
 {
-    if (    !streamMode            .has_value()
-         || !streamModeFunctionLock.has_value()
-       )
-    {
-        streamMode            .reset();
-        streamModeFunctionLock.reset();
-        
-        return false;
-    }
-    
-    return true;
+    return    streamMode            .has_value()
+           && streamModeFunctionLock.has_value();
 }
 
 bool See3CAM_24CUG::fetchStreamMode()
@@ -1984,32 +2095,36 @@ bool See3CAM_24CUG::fetchStreamMode()
 
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
     g_out_packet_buf[2] = GET_STREAM_MODE_24CUG;
-    
-    streamModeSource = ssrc::DEVICE;
 
-    if (    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
-         && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
-         && g_in_packet_buf[1] == GET_STREAM_MODE_24CUG
-         && g_in_packet_buf[6] == GET_SUCCESS
-       )
-    {
-        streamMode             = enum_cast
-                                 <StreamMode>(g_in_packet_buf[2]);
-        streamModeFunctionLock = (bool)g_in_packet_buf[3];
-        checkStreamMode();
-        
-        return true;
-    } else {
-        streamMode            .reset();
-        streamModeFunctionLock.reset();
-        
-        return true;
-    }
+    bool fetched =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+                   && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
+                   && g_in_packet_buf[1] == GET_STREAM_MODE_24CUG
+                   && g_in_packet_buf[6] == GET_SUCCESS;
+    
+    if ( fetched ) [[  likely]]
+        streamMode = enum_cast<StreamMode>(g_in_packet_buf[2]);
+    else
+        streamMode.reset();
+    
+    if ( streamMode ) { streamModeFunctionLock = (decltype(streamModeFunctionLock)::value_type)
+                                                 (g_in_packet_buf[3]);
+                        streamModeSource = ssrc::DEVICE;
+                      }
+    else              { streamModeFunctionLock.reset();
+                        streamModeSource = ssrc::NONE;
+                      }
+    
+    if ( fetched && !checkStreamMode() ) [[unlikely]]
+        clog << "See3CAM_24CUG::fetchStreamMode: values reported by "
+                "device not valid according to our domain knowledge!"
+             << endl;
+    
+    return streamModeSource == ssrc::DEVICE;
 }
 
 bool See3CAM_24CUG::applyStreamMode()
 {
-    if ( !streamMode.has_value() )
+    if ( streamModeSource == ssrc::NONE || !streamMode.has_value() )
         return false;
     
     initializeBuffers();
@@ -2019,14 +2134,24 @@ bool See3CAM_24CUG::applyStreamMode()
     g_out_packet_buf[3] = enum_integer(streamMode.value());
     g_out_packet_buf[4] = streamModeFunctionLock.value();
     
-    if (    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
-         && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
-         && g_in_packet_buf[1] == SET_STREAM_MODE_24CUG
-         && g_in_packet_buf[6] == SET_SUCCESS
-       )
-        return true;
-    else
+    bool applied =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+                   && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
+                   && g_in_packet_buf[1] == SET_STREAM_MODE_24CUG
+                   && g_in_packet_buf[6] == SET_SUCCESS;
+    
+    if ( !applied ) [[unlikely]]
+    {
+        streamMode            .reset();
+        streamModeFunctionLock.reset();
+        streamModeSource = ssrc::NONE;
+        
+        clog << "V4L2Cam::applyStreamMode: ioctl failed!"
+             << endl;
+        
         return false;
+    }
+    else
+        return fetchStreamMode();
 }
 
 
@@ -2038,17 +2163,18 @@ bool See3CAM_24CUG::setToDefault()
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
     g_out_packet_buf[2] = SET_TO_DEFAULT_24CUG;
     
-    if (    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
-         && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
-         && g_in_packet_buf[1] == SET_TO_DEFAULT_24CUG
-         && g_in_packet_buf[6] == SET_SUCCESS
-       )
+    bool applied =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+                   && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
+                   && g_in_packet_buf[1] == SET_TO_DEFAULT_24CUG
+                   && g_in_packet_buf[6] == SET_SUCCESS;
+    
+    if ( !applied ) [[unlikely]]
+        return false;
+    else
     {
         initializeSettings();
         return true;
     }
-    else
-        return false;
 }
 
 

@@ -32,6 +32,7 @@
 #include <sys/mman.h>
 #include <sys/ioctl.h>
 #include <linux/videodev2.h>
+#include <libusb-1.0/libusb.h>
 #include <linux/usbdevice_fs.h>
 // #include <stdbool.h>
 
@@ -1912,17 +1913,17 @@ void V4L2Cam::initializeSettings()
 
 void V4L2Cam::reapplySettings()
 {
-    if (         resolutionSource != ssrc::NONE
-         ||           pixelSource != ssrc::NONE ) applyResolutionAndPixelFormat();
-    if (         brightnessSource != ssrc::NONE ) applyBrightness();
-    if (           contrastSource != ssrc::NONE ) applyContrast();
-    if (         saturationSource != ssrc::NONE ) applySaturation();
-    if (          sharpnessSource != ssrc::NONE ) applySharpness();
-    if (              gammaSource != ssrc::NONE ) applyGamma();
-    if (       whiteBalanceSource != ssrc::NONE ) applyWhiteBalance();
-    if (               gainSource != ssrc::NONE ) applyGain();
-    if ( powerLineFrequencySource != ssrc::NONE ) applyPowerLineFrequency();
-    if (           exposureSource != ssrc::NONE ) applyExposure();
+    if (         resolutionSource == ssrc::DEVICE
+         ||     pixelFormatSource == ssrc::DEVICE ) applyResolutionAndPixelFormat();
+    if (         brightnessSource == ssrc::DEVICE ) applyBrightness();
+    if (           contrastSource == ssrc::DEVICE ) applyContrast();
+    if (         saturationSource == ssrc::DEVICE ) applySaturation();
+    if (          sharpnessSource == ssrc::DEVICE ) applySharpness();
+    if (              gammaSource == ssrc::DEVICE ) applyGamma();
+    if (       whiteBalanceSource == ssrc::DEVICE ) applyWhiteBalance();
+    if (               gainSource == ssrc::DEVICE ) applyGain();
+    if ( powerLineFrequencySource == ssrc::DEVICE ) applyPowerLineFrequency();
+    if (           exposureSource == ssrc::DEVICE ) applyExposure();
 }
 
 // // only to be used by locateDeviceNodeAndInitialize()
@@ -2639,7 +2640,7 @@ bool V4L2Cam::resetAtUSBHubPort( string const& usbBusNumber
                                             );
     
     constexpr uint16_t PORT_POWER       = 8;
-    constexpr uint16_t PORT_RESET       = 4;
+    // constexpr uint16_t PORT_RESET       = 4;
     constexpr uint8_t  REQTYPE_PORT_OUT = static_cast<uint8_t>(LIBUSB_ENDPOINT_OUT      )
                                         | static_cast<uint8_t>(LIBUSB_REQUEST_TYPE_CLASS)
                                         | static_cast<uint8_t>(LIBUSB_RECIPIENT_OTHER   );
@@ -3135,11 +3136,7 @@ bool V4L2Cam::fetchResolutionAndPixelFormat()
         return false;
     
     v4l2_format format{};
-    
-    resolutionSource  = ssrc::DEVICE;
-    pixelFormatSource = ssrc::DEVICE;
-    
-    format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+                format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
     
     if ( xioctl( *fd_ptr
                , VIDIOC_G_FMT
@@ -3148,65 +3145,28 @@ bool V4L2Cam::fetchResolutionAndPixelFormat()
                , XIOCTL_FLAGS::EXPECT_EINVAL
                )
        )
+        updateResNPixFmtFromDeviceInfo(format);
+    else
     {
-        apiToUse = APIToUse::MULTI;
+        format = {};
+        format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         
-        if ( checkResolution(format.fmt.pix_mp.width, format.fmt.pix_mp.height) )
-        {
-            width  = static_cast<uint32_t>(format.fmt.pix_mp.width);
-            height = static_cast<uint32_t>(format.fmt.pix_mp.height);
-        }
+        if ( xioctl(*fd_ptr, VIDIOC_G_FMT, "VIDIOC_G_FMT", &format) )
+            updateResNPixFmtFromDeviceInfo(format);
         else
-        {
-            width .reset();
-            height.reset();
-        }
-        
-        pixelFormat = enum_cast<PixelFormat>(format.fmt.pix_mp.pixelformat);
-        
-        if ( format.fmt.pix_mp.num_planes == 1 ) // currently, we support no more
-            currentBufferSizeNeeded
-             =  static_cast<uint32_t>(format.fmt.pix_mp.plane_fmt[0].sizeimage);
-        
-        return true;
+            resetResNPixFmt();
     }
     
-    format = {};
-    format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    
-    if ( xioctl(*fd_ptr, VIDIOC_G_FMT, "VIDIOC_G_FMT", &format) )
-    {
-        apiToUse = APIToUse::SINGLE;
-        
-        if ( checkResolution(format.fmt.pix.width, format.fmt.pix.height) ) {
-            width  = format.fmt.pix.width;
-            height = format.fmt.pix.height;
-        } else {
-            width .reset();
-            height.reset();
-        }
-        
-        pixelFormat = enum_cast<PixelFormat>(format.fmt.pix.pixelformat);
-        
-        currentBufferSizeNeeded = format.fmt.pix.sizeimage;
-        
-        return true;
-    }
-
-    apiToUse = APIToUse::UNKNOWN;
-    
-    width      .reset();
-    height     .reset();
-    pixelFormat.reset();
-    
-    currentBufferSizeNeeded.reset();
-    
-    return false;
+    return     resolutionSource == ssrc::DEVICE
+           && pixelFormatSource == ssrc::DEVICE
+           && currentBufferSizeNeeded;
 }
 
 bool V4L2Cam::applyResolutionAndPixelFormat()
 {
-    if ( !checkResolution() || !checkPixelFormat() )
+    if (    (  resolutionSource == ssrc::NONE || !checkResolution () )
+         && ( pixelFormatSource == ssrc::NONE || !checkPixelFormat() )
+       )
         return false;
     
     auto fd_ptr = produceV4L2FD();
@@ -3228,11 +3188,16 @@ bool V4L2Cam::applyResolutionAndPixelFormat()
     {
         apiToUse = APIToUse::MULTI;
         
-        format.fmt.pix_mp.width       = width      .value();
-        format.fmt.pix_mp.height      = height     .value();
-        format.fmt.pix_mp.pixelformat = enum_integer(pixelFormat.value());
+        if ( resolutionSource != ssrc::NONE && checkResolution() )
+        {
+            format.fmt.pix_mp.width  = width .value();
+            format.fmt.pix_mp.height = height.value();
+        }
+        if ( pixelFormatSource != ssrc::NONE && checkPixelFormat() )
+            format.fmt.pix_mp.pixelformat = enum_integer(pixelFormat.value());
+        
         // format.fmt.pix_mp.field = V4L2_FIELD_INTERLACED; // from e-con's example. strange
-        format.fmt.pix_mp.field       = V4L2_FIELD_NONE;
+        format.fmt.pix_mp.field = V4L2_FIELD_NONE;
     }
     else
     {
@@ -3244,15 +3209,20 @@ bool V4L2Cam::applyResolutionAndPixelFormat()
         {
             apiToUse = APIToUse::SINGLE;
             
-            format.fmt.pix.width       = width      .value();
-            format.fmt.pix.height      = height     .value();
-            format.fmt.pix.pixelformat = enum_integer(pixelFormat.value());
+            if ( resolutionSource != ssrc::NONE && checkResolution() )
+            {
+                format.fmt.pix.width  = width .value();
+                format.fmt.pix.height = height.value();
+            }
+            if ( pixelFormatSource != ssrc::NONE && checkPixelFormat() )
+                format.fmt.pix.pixelformat = enum_integer(pixelFormat.value());
+            
             // format.fmt.pix.field = V4L2_FIELD_INTERLACED; // from e-con's example. strange
-            format.fmt.pix.field       = V4L2_FIELD_NONE;
+            format.fmt.pix.field = V4L2_FIELD_NONE;
         }
         else
         {
-            apiToUse = APIToUse::UNKNOWN;
+            resetResNPixFmt();
             
             return false;
         }
@@ -3260,17 +3230,113 @@ bool V4L2Cam::applyResolutionAndPixelFormat()
     
     
     if ( xioctl(*fd_ptr, VIDIOC_S_FMT, "VIDIOC_S_FMT", &format) ) [[  likely]]
-    {
-        currentBufferSizeNeeded = format.fmt.pix.sizeimage;
-        
-        return true;
-    }
+        updateResNPixFmtFromDeviceInfo(format);
     else
+        resetResNPixFmt();
+    
+    return     resolutionSource == ssrc::DEVICE
+           && pixelFormatSource == ssrc::DEVICE
+           && currentBufferSizeNeeded;
+}
+
+void V4L2Cam::updateResNPixFmtFromDeviceInfo(v4l2_format const& format) noexcept
+{
+    if ( format.type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE )
     {
-        currentBufferSizeNeeded.reset();
+        apiToUse = APIToUse::MULTI;
         
-        return false;
+        if ( checkResolution(format.fmt.pix_mp.width, format.fmt.pix_mp.height) )
+        {
+            width            = static_cast<uint32_t>(format.fmt.pix_mp.width);
+            height           = static_cast<uint32_t>(format.fmt.pix_mp.height);
+            resolutionSource = ssrc::DEVICE;
+            
+            if ( !checkResolution(format.fmt.pix_mp.width, format.fmt.pix_mp.height) )
+            [[unlikely]]
+                clog << "V4L2Cam::updateResNPixFmtFromDeviceInfo: resolution "
+                        " reported by device not valid according to our domain "
+                        "knowledge!"
+                     << endl;
+        }
+        else
+        {
+            width .reset();
+            height.reset();
+            resolutionSource = ssrc::NONE;
+        }
+        
+        pixelFormat = enum_cast<PixelFormat>(format.fmt.pix_mp.pixelformat);
+        
+        if ( !pixelFormat && format.fmt.pix_mp.pixelformat > 0 ) [[unlikely]]
+            clog << "V4L2Cam::updateResNPixFmtFromDeviceInfo: pixel format "
+                    " reported by device not valid according to our domain "
+                    "knowledge!"
+                 << endl;
+        
+        if ( pixelFormat ) pixelFormatSource = ssrc::DEVICE;
+        else               pixelFormatSource = ssrc::NONE;
+        
+        if (    format.fmt.pix_mp.             num_planes == 1 // currently, we support no more
+             && format.fmt.pix_mp.plane_fmt[0].sizeimage   > 0
+           ) [[  likely]]
+            currentBufferSizeNeeded
+             =  static_cast<uint32_t>(format.fmt.pix_mp.plane_fmt[0].sizeimage);
+        else
+            currentBufferSizeNeeded.reset();
     }
+    else /* format.type == V4L2_BUF_TYPE_VIDEO_CAPTURE */
+    {
+        apiToUse = APIToUse::SINGLE;
+        
+        if ( checkResolution(format.fmt.pix.width, format.fmt.pix.height) ) {
+            width            = format.fmt.pix.width;
+            height           = format.fmt.pix.height;
+            resolutionSource = ssrc::DEVICE;
+            
+            if ( !checkResolution(format.fmt.pix.width, format.fmt.pix.height) )
+            [[unlikely]]
+                clog << "V4L2Cam::updateResNPixFmtFromDeviceInfo: resolution "
+                        " reported by device not valid according to our domain "
+                        "knowledge!"
+                     << endl;
+        }
+        else
+        {
+            width .reset();
+            height.reset();
+            resolutionSource = ssrc::NONE;
+        }
+        
+        pixelFormat = enum_cast<PixelFormat>(format.fmt.pix.pixelformat);
+        
+        if ( !pixelFormat && format.fmt.pix_mp.pixelformat > 0 ) [[unlikely]]
+            clog << "V4L2Cam::updateResNPixFmtFromDeviceInfo: pixel format "
+                    " reported by device not valid according to our domain "
+                    "knowledge!"
+                 << endl;
+        
+        if ( pixelFormat ) pixelFormatSource = ssrc::DEVICE;
+        else               pixelFormatSource = ssrc::NONE;
+        
+        if ( format.fmt.pix.sizeimage > 0 )
+            currentBufferSizeNeeded = format.fmt.pix.sizeimage;
+        else
+            currentBufferSizeNeeded.reset();
+    }
+}
+
+void V4L2Cam::resetResNPixFmt() noexcept
+{
+    apiToUse = APIToUse::UNKNOWN;
+    
+    width      .reset();
+    height     .reset();
+    pixelFormat.reset();
+    
+    resolutionSource = ssrc::NONE;
+    pixelFormatSource = ssrc::NONE;
+    
+    currentBufferSizeNeeded.reset();
 }
 
 
@@ -3345,37 +3411,49 @@ bool V4L2Cam::fetchBrightness()
                                       , value
                                       );
     
-    brightness = fetched && checkBrightness(value)
-               ? decltype(brightness)(value)
-               : decltype(brightness)(nullopt);
+    if ( fetched ) { brightness       = (decltype(brightness)::value_type)(value);
+                     brightnessSource = ssrc::DEVICE;
+                   }
+    else           { brightness.reset();
+                     brightnessSource = ssrc::NONE;
+                   }
     
-    if ( brightness )
-        brightnessSource = ssrc::DEVICE;
+    if ( fetched && !checkBrightness() ) [[unlikely]]
+        clog << "V4L2Cam::fetchBrightness: value reported by device not valid "
+                "according to our domain knowledge!"
+             << endl;
     
-    return fetched;
+    return brightnessSource == ssrc::DEVICE;
 }
 
 bool V4L2Cam::applyBrightness()
 {
-    if ( !checkBrightness() )
+    if ( brightnessSource == ssrc::NONE || !checkBrightness() )
         return false;
     
     int32_t value = brightness.value();
     
-    if ( BRIGHTNESS_DOMAIN_KNOWN && BRIGHTNESS_STEP != 1 )
+    if ( BRIGHTNESS_DOMAIN_KNOWN && BRIGHTNESS_STEP > 1 )
         value -= (value - BRIGHTNESS_MIN) % BRIGHTNESS_STEP;
     
-    if ( !apply_control_value( produceV4L2FD()
-                             , V4L2_CID_BRIGHTNESS
-                             , "V4L2_CID_BRIGHTNESS"
-                             , value
-                             )
-       )
+    bool applied = apply_control_value( produceV4L2FD()
+                                      , V4L2_CID_BRIGHTNESS
+                                      , "V4L2_CID_BRIGHTNESS"
+                                      , value
+                                      );
+    
+    if ( !applied ) [[unlikely]]
+    {
+        brightness.reset();
+        brightnessSource = ssrc::NONE;
+        
+        clog << "V4L2Cam::applyBrightness: ioctl failed!"
+             << endl;
+        
         return false;
-    
-    brightnessSource = ssrc::DEVICE;
-    
-    return true;
+    }
+    else
+        return fetchBrightness();
 }
 
 
@@ -3428,37 +3506,49 @@ bool V4L2Cam::fetchContrast()
                                       , value
                                       );
     
-    contrast = fetched && checkContrast(value)
-             ? decltype(contrast)(value)
-             : decltype(contrast)(nullopt);
+    if ( fetched ) { contrast       = (decltype(contrast)::value_type)(value);
+                     contrastSource = ssrc::DEVICE;
+                   }
+    else           { contrast.reset();
+                     contrastSource = ssrc::NONE;
+                   }
     
-    if ( contrast )
-        contrastSource = ssrc::DEVICE;
+    if ( fetched && !checkContrast() ) [[unlikely]]
+        clog << "V4L2Cam::fetchContrast: value reported by device not valid "
+                "according to our domain knowledge!"
+             << endl;
     
-    return fetched;
+    return contrastSource == ssrc::DEVICE;
 }
 
 bool V4L2Cam::applyContrast()
 {
-    if ( !checkContrast() )
+    if ( contrastSource == ssrc::NONE || !checkContrast() )
         return false;
     
     int32_t value = contrast.value();
     
-    if ( CONTRAST_DOMAIN_KNOWN && CONTRAST_STEP != 1 )
+    if ( CONTRAST_DOMAIN_KNOWN && CONTRAST_STEP > 1 )
         value -= (value - CONTRAST_MIN) % CONTRAST_STEP;
     
-    if ( !apply_control_value( produceV4L2FD()
-                             , V4L2_CID_CONTRAST
-                             , "V4L2_CID_CONTRAST"
-                             , value
-                             )
-       )
+    bool applied = apply_control_value( produceV4L2FD()
+                                      , V4L2_CID_CONTRAST
+                                      , "V4L2_CID_CONTRAST"
+                                      , value
+                                      );
+    
+    if ( !applied ) [[unlikely]]
+    {
+        contrast.reset();
+        contrastSource = ssrc::NONE;
+        
+        clog << "V4L2Cam::applyContrast: ioctl failed!"
+             << endl;
+        
         return false;
-    
-    contrastSource = ssrc::DEVICE;
-    
-    return true;
+    }
+    else
+        return fetchContrast();
 }
 
 
@@ -3511,37 +3601,49 @@ bool V4L2Cam::fetchSaturation()
                                       , value
                                       );
     
-    saturation = fetched && checkSaturation(value)
-               ? decltype(saturation)(value)
-               : decltype(saturation)(nullopt);
+    if ( fetched ) { saturation       = (decltype(saturation)::value_type)(value);
+                     saturationSource = ssrc::DEVICE;
+                   }
+    else           { saturation.reset();
+                     saturationSource = ssrc::NONE;
+                   }
     
-    if ( saturation )
-    saturationSource = ssrc::DEVICE;
+    if ( fetched && !checkSaturation() ) [[unlikely]]
+        clog << "V4L2Cam::fetchSaturation: value reported by device not valid "
+                "according to our domain knowledge!"
+             << endl;
     
-    return fetched;
+    return saturationSource == ssrc::DEVICE;
 }
 
 bool V4L2Cam::applySaturation()
 {
-    if ( !checkSaturation() )
+    if ( saturationSource == ssrc::NONE || !checkSaturation() )
         return false;
     
     int32_t value = saturation.value();
     
-    if ( SATURATION_DOMAIN_KNOWN && SATURATION_STEP != 1 )
+    if ( SATURATION_DOMAIN_KNOWN && SATURATION_STEP > 1 )
         value -= (value - SATURATION_MIN) % SATURATION_STEP;
     
-    if ( !apply_control_value( produceV4L2FD()
-                             , V4L2_CID_SATURATION
-                             , "V4L2_CID_SATURATION"
-                             , value
-                             )
-       )
+    bool applied = apply_control_value( produceV4L2FD()
+                                      , V4L2_CID_SATURATION
+                                      , "V4L2_CID_SATURATION"
+                                      , value
+                                      );
+    
+    if ( !applied ) [[unlikely]]
+    {
+        saturation.reset();
+        saturationSource = ssrc::NONE;
+        
+        clog << "V4L2Cam::applySaturation: ioctl failed!"
+             << endl;
+        
         return false;
-    
-    saturationSource = ssrc::DEVICE;
-    
-    return true;
+    }
+    else
+        return fetchSaturation();
 }
 
 
@@ -3594,37 +3696,49 @@ bool V4L2Cam::fetchSharpness()
                                       , value
                                       );
     
-    sharpness = fetched && checkSharpness(value)
-              ? decltype(sharpness)(value)
-              : decltype(sharpness)(nullopt);
+    if ( fetched ) { sharpness       = (decltype(sharpness)::value_type)(value);
+                     sharpnessSource = ssrc::DEVICE;
+                   }
+    else           { sharpness.reset();
+                     sharpnessSource = ssrc::NONE;
+                   }
     
-    if ( sharpness )
-        sharpnessSource = ssrc::DEVICE;
+    if ( fetched && !checkSharpness() ) [[unlikely]]
+        clog << "V4L2Cam::fetchSharpness: value reported by device not valid "
+                "according to our domain knowledge!"
+             << endl;
     
-    return fetched;
+    return sharpnessSource == ssrc::DEVICE;
 }
 
 bool V4L2Cam::applySharpness()
 {
-    if ( !checkSharpness() )
+    if ( sharpnessSource == ssrc::NONE || !checkSharpness() )
         return false;
     
     int32_t value = sharpness.value();
     
-    if ( SHARPNESS_DOMAIN_KNOWN && SHARPNESS_STEP != 1 )
+    if ( SHARPNESS_DOMAIN_KNOWN && SHARPNESS_STEP > 1 )
         value -= (value - SHARPNESS_MIN) % SHARPNESS_STEP;
     
-    if ( !apply_control_value( produceV4L2FD()
-                             , V4L2_CID_SHARPNESS
-                             , "V4L2_CID_SHARPNESS"
-                             , value
-                             )
-       )
+    bool applied = apply_control_value( produceV4L2FD()
+                                      , V4L2_CID_SHARPNESS
+                                      , "V4L2_CID_SHARPNESS"
+                                      , value
+                                      );
+    
+    if ( !applied ) [[unlikely]]
+    {
+        sharpness.reset();
+        sharpnessSource = ssrc::NONE;
+        
+        clog << "V4L2Cam::applySharpness: ioctl failed!"
+             << endl;
+        
         return false;
-    
-    sharpnessSource = ssrc::DEVICE;
-    
-    return true;
+    }
+    else
+        return fetchSharpness();
 }
 
 
@@ -3677,37 +3791,49 @@ bool V4L2Cam::fetchGamma()
                                       , value
                                       );
     
-    gamma = fetched && checkGamma(value)
-          ? decltype(gamma)(value)
-          : decltype(gamma)(nullopt);
+    if ( fetched ) { gamma       = (decltype(gamma)::value_type)(value);
+                     gammaSource = ssrc::DEVICE;
+                   }
+    else           { gamma.reset();
+                     gammaSource = ssrc::NONE;
+                   }
     
-    if ( gamma )
-        gammaSource = ssrc::DEVICE;
+    if ( fetched && !checkGamma() ) [[unlikely]]
+        clog << "V4L2Cam::fetchGamma: value reported by device not valid "
+                "according to our domain knowledge!"
+             << endl;
     
-    return fetched;
+    return gammaSource == ssrc::DEVICE;
 }
 
 bool V4L2Cam::applyGamma()
 {
-    if ( !checkGamma() )
+    if ( gammaSource == ssrc::NONE || !checkGamma() )
         return false;
     
     int32_t value = gamma.value();
     
-    if ( GAMMA_DOMAIN_KNOWN && GAMMA_STEP != 1 )
+    if ( GAMMA_DOMAIN_KNOWN && GAMMA_STEP > 1 )
         value -= (value - GAMMA_MIN) % GAMMA_STEP;
     
-    if ( !apply_control_value( produceV4L2FD()
-                             , V4L2_CID_GAMMA
-                             , "V4L2_CID_GAMMA"
-                             , value
-                             )
-       )
+    bool applied = apply_control_value( produceV4L2FD()
+                                      , V4L2_CID_GAMMA
+                                      , "V4L2_CID_GAMMA"
+                                      , value
+                                      );
+    
+    if ( !applied ) [[unlikely]]
+    {
+        gamma.reset();
+        gammaSource = ssrc::NONE;
+        
+        clog << "V4L2Cam::applyGamma: ioctl failed!"
+             << endl;
+        
         return false;
-    
-    gammaSource = ssrc::DEVICE;
-    
-    return true;
+    }
+    else
+        return fetchGamma();
 }
 
 
@@ -3760,37 +3886,49 @@ bool V4L2Cam::fetchWhiteBalance()
                                       , value
                                       );
     
-    whiteBalance = fetched && checkWhiteBalance(value)
-                 ? decltype(whiteBalance)(value)
-                 : decltype(whiteBalance)(nullopt);
+    if ( fetched ) { whiteBalance       = (decltype(whiteBalance)::value_type)(value);
+                     whiteBalanceSource = ssrc::DEVICE;
+                   }
+    else           { whiteBalance.reset();
+                     whiteBalanceSource = ssrc::NONE;
+                   }
     
-    if ( whiteBalance )
-        whiteBalanceSource = ssrc::DEVICE;
+    if ( fetched && !checkWhiteBalance() ) [[unlikely]]
+        clog << "V4L2Cam::fetchWhiteBalance: value reported by device not valid "
+                "according to our domain knowledge!"
+             << endl;
     
-    return fetched;
+    return whiteBalanceSource == ssrc::DEVICE;
 }
 
 bool V4L2Cam::applyWhiteBalance()
 {
-    if ( !checkWhiteBalance() )
+    if ( whiteBalanceSource == ssrc::NONE || !checkWhiteBalance() )
         return false;
     
     int32_t value = whiteBalance.value();
     
-    if ( WHITE_BALANCE_DOMAIN_KNOWN && WHITE_BALANCE_STEP != 1 )
+    if ( WHITE_BALANCE_DOMAIN_KNOWN && WHITE_BALANCE_STEP > 1 )
         value -= (value - WHITE_BALANCE_MIN) % WHITE_BALANCE_STEP;
     
-    if ( !apply_control_value( produceV4L2FD()
-                             , V4L2_CID_WHITE_BALANCE_TEMPERATURE
-                             , "V4L2_CID_WHITE_BALANCE_TEMPERATURE"
-                             , value
-                             )
-       )
+    bool applied = apply_control_value( produceV4L2FD()
+                                      , V4L2_CID_WHITE_BALANCE_TEMPERATURE
+                                      , "V4L2_CID_WHITE_BALANCE_TEMPERATURE"
+                                      , value
+                                      );
+    
+    if ( !applied ) [[unlikely]]
+    {
+        whiteBalance.reset();
+        whiteBalanceSource = ssrc::NONE;
+        
+        clog << "V4L2Cam::applyWhiteBalance: ioctl failed!"
+             << endl;
+        
         return false;
-    
-    whiteBalanceSource = ssrc::DEVICE;
-    
-    return true;
+    }
+    else
+        return fetchWhiteBalance();
 }
 
 
@@ -3843,37 +3981,49 @@ bool V4L2Cam::fetchGain()
                                       , value
                                       );
     
-    gain = fetched && checkGain(value)
-         ? decltype(gain)(value)
-         : decltype(gain)(nullopt);
+    if ( fetched ) { gain       = (decltype(gain)::value_type)(value);
+                     gainSource = ssrc::DEVICE;
+                   }
+    else           { gain.reset();
+                     gainSource = ssrc::NONE;
+                   }
     
-    if ( gain )
-        gainSource = ssrc::DEVICE;
+    if ( fetched && !checkGain() ) [[unlikely]]
+        clog << "V4L2Cam::fetchGain: value reported by device not valid "
+                "according to our domain knowledge!"
+             << endl;
     
-    return fetched;
+    return gainSource == ssrc::DEVICE;
 }
 
 bool V4L2Cam::applyGain()
 {
-    if ( !checkGain() )
+    if ( gainSource == ssrc::NONE || !checkGain() )
         return false;
     
     int32_t value = gain.value();
     
-    if ( GAIN_DOMAIN_KNOWN && GAIN_STEP != 1 )
+    if ( GAIN_DOMAIN_KNOWN && GAIN_STEP > 1 )
         value -= (value - GAIN_MIN) % GAIN_STEP;
     
-    if ( !apply_control_value( produceV4L2FD()
-                             , V4L2_CID_GAIN
-                             , "V4L2_CID_GAIN"
-                             , value
-                             )
-       )
+    bool applied = apply_control_value( produceV4L2FD()
+                                      , V4L2_CID_GAIN
+                                      , "V4L2_CID_GAIN"
+                                      , value
+                                      );
+    
+    if ( !applied ) [[unlikely]]
+    {
+        gain.reset();
+        gainSource = ssrc::NONE;
+        
+        clog << "V4L2Cam::applyGain: ioctl failed!"
+             << endl;
+        
         return false;
-    
-    gainSource = ssrc::DEVICE;
-    
-    return true;
+    }
+    else
+        return fetchGain();
 }
 
 
@@ -3916,33 +4066,45 @@ bool V4L2Cam::fetchPowerLineFrequency()
                                       , value
                                       );
 
-    if ( fetched )
+    if ( fetched ) [[  likely]]
         powerLineFrequency = enum_cast<PowerLineFrequency>(value);
     else
         powerLineFrequency.reset();
     
-    if ( powerLineFrequency )
-        powerLineFrequencySource = ssrc::DEVICE;
+    if ( powerLineFrequency ) powerLineFrequencySource = ssrc::DEVICE;
+    else                      powerLineFrequencySource = ssrc::NONE;
     
-    return fetched;
+    if ( fetched && !powerLineFrequency ) [[unlikely]]
+        clog << "V4L2Cam::fetchPowerLineFrequency: value reported by device not valid "
+                "according to our domain knowledge!"
+             << endl;
+    
+    return powerLineFrequencySource == ssrc::DEVICE;
 }
 
 bool V4L2Cam::applyPowerLineFrequency()
 {
-    if ( !powerLineFrequency.has_value() )
+    if ( powerLineFrequencySource == ssrc::NONE || !powerLineFrequency.has_value() )
         return false;
     
-    if ( !apply_control_value( produceV4L2FD()
-                             , V4L2_CID_POWER_LINE_FREQUENCY
-                             , "V4L2_CID_POWER_LINE_FREQUENCY"
-                             , enum_integer(powerLineFrequency.value())
-                             )
-       )
+    bool applied = apply_control_value( produceV4L2FD()
+                                      , V4L2_CID_POWER_LINE_FREQUENCY
+                                      , "V4L2_CID_POWER_LINE_FREQUENCY"
+                                      , enum_integer(powerLineFrequency.value())
+                                      );
+    
+    if ( !applied ) [[unlikely]]
+    {
+        powerLineFrequency.reset();
+        powerLineFrequencySource = ssrc::NONE;
+        
+        clog << "V4L2Cam::applyPowerLineFrequency: ioctl failed!"
+             << endl;
+        
         return false;
-    
-    powerLineFrequencySource = ssrc::DEVICE;
-    
-    return true;
+    }
+    else
+        return fetchPowerLineFrequency();
 }
 
 
@@ -3995,37 +4157,49 @@ bool V4L2Cam::fetchExposure()
                                       , value
                                       );
     
-    exposure = fetched && checkExposure(value)
-             ? decltype(exposure)(value)
-             : decltype(exposure)(nullopt);
+    if ( fetched ) { exposure       = (decltype(exposure)::value_type)(value);
+                     exposureSource = ssrc::DEVICE;
+                   }
+    else           { exposure.reset();
+                     exposureSource = ssrc::NONE;
+                   }
     
-    if ( exposure )
-        exposureSource = ssrc::DEVICE;
+    if ( fetched && !checkExposure() ) [[unlikely]]
+        clog << "V4L2Cam::fetchExposure: value reported by device not valid "
+                "according to our domain knowledge!"
+             << endl;
     
-    return fetched;
+    return exposureSource == ssrc::DEVICE;
 }
 
 bool V4L2Cam::applyExposure()
 {
-    if ( !checkExposure() )
+    if ( exposureSource == ssrc::NONE || !checkExposure() )
         return false;
     
     int32_t value = exposure.value();
     
-    if ( EXPOSURE_DOMAIN_KNOWN && EXPOSURE_STEP != 1 )
+    if ( EXPOSURE_DOMAIN_KNOWN && EXPOSURE_STEP > 1 )
         value -= (value - EXPOSURE_MIN) % EXPOSURE_STEP;
     
-    if ( !apply_control_value( produceV4L2FD()
-                             , V4L2_CID_EXPOSURE_ABSOLUTE
-                             , "V4L2_CID_EXPOSURE_ABSOLUTE"
-                             , value
-                             )
-       )
+    bool applied = apply_control_value( produceV4L2FD()
+                                      , V4L2_CID_EXPOSURE_ABSOLUTE
+                                      , "V4L2_CID_EXPOSURE_ABSOLUTE"
+                                      , value
+                                      );
+    
+    if ( !applied ) [[unlikely]]
+    {
+        exposure.reset();
+        exposureSource = ssrc::NONE;
+        
+        clog << "V4L2Cam::applyExposure: ioctl failed!"
+             << endl;
+        
         return false;
-    
-    exposureSource = ssrc::DEVICE;
-    
-    return true;
+    }
+    else
+        return fetchExposure();
 }
 
 
