@@ -214,6 +214,9 @@ public:
     bool fetchStreamMode();
     bool applyStreamMode();
     
+    bool  giveFWVersion(uint16_t& M, uint16_t& m1, uint16_t& m2, uint16_t& m3);
+    bool fetchFWVersion();
+    
     bool setToDefault();
     
 private:
@@ -235,7 +238,10 @@ private:
     bool checkStreamMode();
     
     void initializeBuffers();
-    bool  sendHidCmd  (uint8_t* outBuf, uint8_t* inBuf, uint32_t len);
+    bool  sendHidCmd  ( std::string_view opName
+                      , uint8_t*         outBuf
+                      , uint8_t*          inBuf
+                      , uint32_t         len);
     bool drainHidInput(size_t reportLen);
     
     
@@ -395,6 +401,11 @@ private:
     SettingSource                      streamModeSource{};
     std::optional<StreamMode         > streamMode{};
     std::optional<bool               > streamModeFunctionLock{};
+    
+    std::optional<uint16_t           > fwVersionMajor {};
+    std::optional<uint16_t           > fwVersionMinor1{};
+    std::optional<uint16_t           > fwVersionMinor2{};
+    std::optional<uint16_t           > fwVersionMinor3{};
 };
 
 

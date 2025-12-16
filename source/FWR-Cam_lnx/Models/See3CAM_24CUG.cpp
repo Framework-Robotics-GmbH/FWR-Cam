@@ -48,8 +48,8 @@ using namespace std;
 using namespace magic_enum;
 
 
-static constexpr string_view ECON_VID                    = "2560";
-static constexpr string_view CAMERA_PID                  = "c128";
+static constexpr string_view VID_ECON                    = "2560";
+static constexpr string_view PID_24CUG                   = "c128";
 
 static constexpr uint8_t CAMERA_CONTROL_24CUG            = 0xA8;
 
@@ -76,8 +76,8 @@ static constexpr uint8_t SET_FLIP_BOTHFLIP_DISABLE_24CUG = 0x00;
 static constexpr uint8_t GET_FACE_DETECT_RECT_24CUG      = 0x0D;
 static constexpr uint8_t SET_FACE_DETECT_RECT_24CUG      = 0x0E;
 
-static constexpr uint8_t GET_SMILE_DETECTION             = 0x0F;
-static constexpr uint8_t SET_SMILE_DETECTION             = 0x10;
+static constexpr uint8_t GET_SMILE_DETECTION_24CUG       = 0x0F;
+static constexpr uint8_t SET_SMILE_DETECTION_24CUG       = 0x10;
 
 static constexpr uint8_t GET_EXPOSURE_COMPENSATION_24CUG = 0x11;
 static constexpr uint8_t SET_EXPOSURE_COMPENSATION_24CUG = 0x12;
@@ -99,6 +99,8 @@ static constexpr uint8_t SET_STREAM_MODE_24CUG           = 0x1C;
 
 static constexpr uint8_t SET_TO_DEFAULT_24CUG            = 0xFF;
 
+static constexpr uint8_t GET_FIRMWARE_VERSION_24CUG	     = 0x40;
+
 static constexpr uint8_t SET_FAIL                        = 0x00;
 static constexpr uint8_t SET_SUCCESS                     = 0x01;
 static constexpr uint8_t GET_FAIL                        = 0x00;
@@ -114,14 +116,14 @@ See3CAM_24CUG:: See3CAM_24CUG(string const& serialNo) noexcept
 See3CAM_24CUG::~See3CAM_24CUG() {}
 
 
-string_view const& See3CAM_24CUG::produceVendorID()  noexcept { return   ECON_VID; }
-string_view const& See3CAM_24CUG::produceProductID() noexcept { return CAMERA_PID; }
+string_view const& See3CAM_24CUG::produceVendorID()  noexcept { return VID_ECON ; }
+string_view const& See3CAM_24CUG::produceProductID() noexcept { return PID_24CUG; }
 
 
 bool See3CAM_24CUG::gatherSerialNumbers(vector<string>& serials) noexcept
 {
-    return V4L2Cam::gatherSerialNumbers(   ECON_VID
-                                       , CAMERA_PID
+    return V4L2Cam::gatherSerialNumbers( VID_ECON
+                                       , PID_24CUG
                                        , serials
                                        );
 }
@@ -188,6 +190,23 @@ bool See3CAM_24CUG::_locateDeviceNodeAndInitialize( udev       * uDev
         hidPath = dev_path;
         
         hidFD = make_shared<FD_t>(move(fd));
+        
+        string fwVersion{"<unknown>"};
+        
+        if ( fetchFWVersion() )
+        {
+            fwVersion = to_string(fwVersionMajor .value()) + "."
+                      + to_string(fwVersionMinor1.value()) + "."
+                      + to_string(fwVersionMinor2.value()) + "."
+                      + to_string(fwVersionMinor3.value());
+        }
+            
+        
+        clog << "See3Cam24CugNode::_locateDeviceNodeAndInitialize: found ..."
+             << "\n    hidFD           : " << to_string((int32_t)*v4l2FD)
+             << "\n    hidPath         : " << v4l2Path
+             << "\n    firmware version: " << fwVersion
+             << endl;
         
         if ( !drainHidInput(BUFFER_LENGTH) ) [[unlikely]]
             clog << "See3CAM_24CUG::_locateDeviceNodeAndInitialize: Could not "
@@ -388,9 +407,10 @@ void See3CAM_24CUG::initializeBuffers()
  * param len    - Buffer length
  * return success/failure
  * */
-bool See3CAM_24CUG::sendHidCmd( uint8_t* outBuf
-                              , uint8_t*  inBuf
-                              , uint32_t    len
+bool See3CAM_24CUG::sendHidCmd( std::string_view opName
+                              , uint8_t*         outBuf
+                              , uint8_t*          inBuf
+                              , uint32_t         len
                               )
 {
     using namespace chrono;
@@ -399,6 +419,10 @@ bool See3CAM_24CUG::sendHidCmd( uint8_t* outBuf
     
     if ( !fd_ptr || !*fd_ptr ) [[unlikely]]
     {
+        clog << "See3Cam24CugNode::sendHidCmd: could not open device file to \""
+             << opName << "\"!"
+             << endl;
+        
         errno = 0;
         return false;
     }
@@ -432,7 +456,8 @@ bool See3CAM_24CUG::sendHidCmd( uint8_t* outBuf
             else if ( errNo == EIO )
             {
                 // Optionally implement a retry mechanism here
-                clog << "See3CAM_24CUG::sendHidCmd: Write I/O error: "
+                clog << "See3CAM_24CUG::sendHidCmd: Write I/O error for \""
+                     << opName << "\": "
                      << strerror(errNo)
                      << endl;
                 
@@ -441,7 +466,8 @@ bool See3CAM_24CUG::sendHidCmd( uint8_t* outBuf
             }
             else
             {
-                clog << "See3CAM_24CUG::sendHidCmd: Write error: "
+                clog << "See3CAM_24CUG::sendHidCmd: Write error for \""
+                     << opName << "\": "
                      << strerror(errNo)
                      << endl;
                 
@@ -522,7 +548,7 @@ bool See3CAM_24CUG::sendHidCmd( uint8_t* outBuf
         if ( now >= end_time ) [[unlikely]]
         {
             clog << "See3CAM_24CUG::sendHidCmd: Timeout waiting for response from "
-                    "HID device!"
+                    "HID device for \"" << opName << "\"!"
                  << endl;
             
             errno = 0;
@@ -548,7 +574,8 @@ bool See3CAM_24CUG::sendHidCmd( uint8_t* outBuf
             if ( errNo == EIO )
             {
                 // Optionally implement a retry mechanism here
-                clog << "See3CAM_24CUG::sendHidCmd: Read I/O error: "
+                clog << "See3CAM_24CUG::sendHidCmd: Read I/O error for \""
+                     << opName << "\": "
                      << strerror(errNo)
                      << endl;
                 
@@ -557,7 +584,8 @@ bool See3CAM_24CUG::sendHidCmd( uint8_t* outBuf
             }
             else
             {
-                clog << "See3CAM_24CUG::sendHidCmd: Read error: "
+                clog << "See3CAM_24CUG::sendHidCmd: Read error for \""
+                     << opName << "\": "
                      << strerror(errNo)
                      << endl;
                 
@@ -568,7 +596,8 @@ bool See3CAM_24CUG::sendHidCmd( uint8_t* outBuf
         else if ( read_result == 0 )
         {
             clog << "See3CAM_24CUG::sendHidCmd: HID device disconnected "
-                    "during read."
+                    "during read for \""
+                 << opName << "\"."
                  << endl;
             
             errno = 0;
@@ -738,7 +767,11 @@ bool See3CAM_24CUG::fetchEffectMode()
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
     g_out_packet_buf[2] = GET_SPECIALEFFECT_24CUG;
 
-    bool fetched =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+    bool fetched =    sendHidCmd( "GET_SPECIALEFFECT_24CUG"
+                                , g_out_packet_buf
+                                , g_in_packet_buf
+                                , BUFFER_LENGTH
+                                )
                    && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
                    && g_in_packet_buf[1] == GET_SPECIALEFFECT_24CUG
                    && g_in_packet_buf[6] == GET_SUCCESS;
@@ -770,7 +803,11 @@ bool See3CAM_24CUG::applyEffectMode()
     g_out_packet_buf[2] = SET_SPECIALEFFECT_24CUG;
     g_out_packet_buf[3] = enum_integer(effectMode.value());
     
-    bool applied =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+    bool applied =    sendHidCmd( "SET_SPECIALEFFECT_24CUG"
+                                , g_out_packet_buf
+                                , g_in_packet_buf
+                                , BUFFER_LENGTH
+                                )
                    && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
                    && g_in_packet_buf[1] == SET_SPECIALEFFECT_24CUG
                    && g_in_packet_buf[6] == SET_SUCCESS;  
@@ -836,7 +873,11 @@ bool See3CAM_24CUG::fetchDeNoiseValue()
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
     g_out_packet_buf[2] = GET_DENOISE_24CUG;
     
-    bool fetched =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+    bool fetched =    sendHidCmd( "GET_DENOISE_24CUG"
+                                , g_out_packet_buf
+                                , g_in_packet_buf
+                                , BUFFER_LENGTH
+                                )
                    && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
                    && g_in_packet_buf[1] == GET_DENOISE_24CUG
                    && g_in_packet_buf[6] == GET_SUCCESS;
@@ -868,7 +909,11 @@ bool See3CAM_24CUG::applyDeNoiseValue()
     g_out_packet_buf[2] = SET_DENOISE_24CUG;
     g_out_packet_buf[3] = deNoiseValue.value();
     
-    bool applied =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+    bool applied =    sendHidCmd( "SET_DENOISE_24CUG"
+                                , g_out_packet_buf
+                                , g_in_packet_buf
+                                , BUFFER_LENGTH
+                                )
                    && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
                    && g_in_packet_buf[1] == SET_DENOISE_24CUG
                    && g_in_packet_buf[6] == SET_SUCCESS;
@@ -1065,7 +1110,11 @@ bool See3CAM_24CUG::fetchAutoExpoModeAndROI()
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
     g_out_packet_buf[2] = GET_EXP_ROI_MODE_24CUG;
     
-    bool fetched =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+    bool fetched =    sendHidCmd( "GET_EXP_ROI_MODE_24CUG"
+                                , g_out_packet_buf
+                                , g_in_packet_buf
+                                , BUFFER_LENGTH
+                                )
                    && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
                    && g_in_packet_buf[1] == GET_EXP_ROI_MODE_24CUG
                    && g_in_packet_buf[6] == GET_SUCCESS;
@@ -1118,7 +1167,11 @@ bool See3CAM_24CUG::applyAutoExpoModeAndROI()
         g_out_packet_buf[6] = autoExpoROISize  .value();
     }
     
-    bool applied =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+    bool applied =    sendHidCmd( "SET_EXP_ROI_MODE_24CUG"
+                                , g_out_packet_buf
+                                , g_in_packet_buf
+                                , BUFFER_LENGTH
+                                )
                    && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
                    && g_in_packet_buf[1] == SET_EXP_ROI_MODE_24CUG
                    && g_in_packet_buf[6] == SET_SUCCESS;
@@ -1187,7 +1240,11 @@ bool See3CAM_24CUG::fetchExposureCompensation()
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
     g_out_packet_buf[2] = GET_EXPOSURE_COMPENSATION_24CUG;
     
-    bool fetched =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+    bool fetched =    sendHidCmd( "GET_EXPOSURE_COMPENSATION_24CUG"
+                                , g_out_packet_buf
+                                , g_in_packet_buf
+                                , BUFFER_LENGTH
+                                )
                    && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG 
                    && g_in_packet_buf[1] == GET_EXPOSURE_COMPENSATION_24CUG 
                    && g_in_packet_buf[6] == GET_SUCCESS;
@@ -1226,7 +1283,11 @@ bool See3CAM_24CUG::applyExposureCompensation()
     g_out_packet_buf[5] = (uint8_t)((exposureCompensation.value() >>  8) & 0xFF);
     g_out_packet_buf[6] = (uint8_t)((exposureCompensation.value() >>  0) & 0xFF);
     
-    bool applied =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+    bool applied =    sendHidCmd( "SET_EXPOSURE_COMPENSATION_24CUG"
+                                , g_out_packet_buf
+                                , g_in_packet_buf
+                                , BUFFER_LENGTH
+                                )
                    && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
                    && g_in_packet_buf[1] == SET_EXPOSURE_COMPENSATION_24CUG
                    && g_in_packet_buf[6] == SET_SUCCESS;
@@ -1283,7 +1344,11 @@ bool See3CAM_24CUG::fetchBurstLength()
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
     g_out_packet_buf[2] = GET_BURST_LENGTH_24CUG;
     
-    bool fetched =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+    bool fetched =    sendHidCmd( "GET_BURST_LENGTH_24CUG"
+                                , g_out_packet_buf
+                                , g_in_packet_buf
+                                , BUFFER_LENGTH
+                                )
                    && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
                    && g_in_packet_buf[1] == GET_BURST_LENGTH_24CUG
                    && g_in_packet_buf[6] == GET_SUCCESS;
@@ -1310,7 +1375,11 @@ bool See3CAM_24CUG::applyBurstLength()
     g_out_packet_buf[2] = SET_BURST_LENGTH_24CUG;
     g_out_packet_buf[3] = burstLength.value();
     
-    bool applied =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+    bool applied =    sendHidCmd( "SET_BURST_LENGTH_24CUG"
+                                , g_out_packet_buf
+                                , g_in_packet_buf
+                                , BUFFER_LENGTH
+                                )
                    && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
                    && g_in_packet_buf[1] == SET_BURST_LENGTH_24CUG
                    && g_in_packet_buf[6] == SET_SUCCESS;
@@ -1376,7 +1445,11 @@ bool See3CAM_24CUG::fetchQFactor()
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
     g_out_packet_buf[2] = GET_Q_FACTOR_24CUG;
     
-    bool fetched =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+    bool fetched =    sendHidCmd( "GET_Q_FACTOR_24CUG"
+                                , g_out_packet_buf
+                                , g_in_packet_buf
+                                , BUFFER_LENGTH
+                                )
                    && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
                    && g_in_packet_buf[1] == GET_Q_FACTOR_24CUG
                    && g_in_packet_buf[6] == SET_SUCCESS;
@@ -1408,7 +1481,11 @@ bool See3CAM_24CUG::applyQFactor()
     g_out_packet_buf[2] = SET_Q_FACTOR_24CUG;
     g_out_packet_buf[3] = qFactor.value();
     
-    bool applied =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+    bool applied =    sendHidCmd( "SET_Q_FACTOR_24CUG"
+                                , g_out_packet_buf
+                                , g_in_packet_buf
+                                , BUFFER_LENGTH
+                                )
                    && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
                    && g_in_packet_buf[1] == SET_Q_FACTOR_24CUG
                    && g_in_packet_buf[6] == SET_SUCCESS;
@@ -1476,7 +1553,11 @@ bool See3CAM_24CUG::fetchMirrorMode()
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
     g_out_packet_buf[2] = GET_FLIP_MODE_24CUG;
     
-    bool fetched =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+    bool fetched =    sendHidCmd( "GET_FLIP_MODE_24CUG"
+                                , g_out_packet_buf
+                                , g_in_packet_buf
+                                , BUFFER_LENGTH
+                                )
                    && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
                    && g_in_packet_buf[1] == GET_FLIP_MODE_24CUG
                    && g_in_packet_buf[6] == GET_SUCCESS;
@@ -1508,7 +1589,11 @@ bool See3CAM_24CUG::applyMirrorMode()
     g_out_packet_buf[2] = SET_FLIP_MODE_24CUG;
     g_out_packet_buf[3] = enum_integer(mirrorMode.value());
     
-    bool applied =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+    bool applied =    sendHidCmd( "SET_FLIP_MODE_24CUG"
+                                , g_out_packet_buf
+                                , g_in_packet_buf
+                                , BUFFER_LENGTH
+                                )
                    && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
                    && g_in_packet_buf[1] == SET_FLIP_MODE_24CUG
                    && g_in_packet_buf[6] == SET_SUCCESS;
@@ -1574,7 +1659,11 @@ bool See3CAM_24CUG::fetchFramerate()
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
     g_out_packet_buf[2] = GET_FRAME_RATE_24CUG;
     
-    bool fetched =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+    bool fetched =    sendHidCmd( "GET_FRAME_RATE_24CUG"
+                                , g_out_packet_buf
+                                , g_in_packet_buf
+                                , BUFFER_LENGTH
+                                )
                    && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
                    && g_in_packet_buf[1] == GET_FRAME_RATE_24CUG
                    && g_in_packet_buf[6] == GET_SUCCESS;
@@ -1606,7 +1695,11 @@ bool See3CAM_24CUG::applyFramerate()
     g_out_packet_buf[2] = SET_FRAME_RATE_24CUG;
     g_out_packet_buf[3] = framerate.value();
     
-    bool applied =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+    bool applied =    sendHidCmd( "SET_FRAME_RATE_24CUG"
+                                , g_out_packet_buf
+                                , g_in_packet_buf
+                                , BUFFER_LENGTH
+                                )
                    && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
                    && g_in_packet_buf[1] == SET_FRAME_RATE_24CUG
                    && g_in_packet_buf[6] == SET_SUCCESS;
@@ -1683,7 +1776,11 @@ bool See3CAM_24CUG::fetchFaceDetectMode()
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
     g_out_packet_buf[2] = GET_FACE_DETECT_RECT_24CUG;
     
-    bool fetched =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+    bool fetched =    sendHidCmd( "GET_FACE_DETECT_RECT_24CUG"
+                                , g_out_packet_buf
+                                , g_in_packet_buf
+                                , BUFFER_LENGTH
+                                )
                    && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
                    && g_in_packet_buf[1] == GET_FACE_DETECT_RECT_24CUG
                    && g_in_packet_buf[6] == GET_SUCCESS;
@@ -1726,7 +1823,11 @@ bool See3CAM_24CUG::applyFaceDetectMode()
     g_out_packet_buf[4] = enum_integer(faceEmbedMode      .value());
     g_out_packet_buf[5] = enum_integer(faceOverlayRectMode.value());
     
-    bool applied =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+    bool applied =    sendHidCmd( "SET_FACE_DETECT_RECT_24CUG"
+                                , g_out_packet_buf
+                                , g_in_packet_buf
+                                , BUFFER_LENGTH
+                                )
                    && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
                    && g_in_packet_buf[1] == SET_FACE_DETECT_RECT_24CUG
                    && g_in_packet_buf[6] == SET_SUCCESS;
@@ -1796,11 +1897,15 @@ bool See3CAM_24CUG::fetchSmileDetectMode()
     initializeBuffers();
     
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
-    g_out_packet_buf[2] = GET_SMILE_DETECTION;
+    g_out_packet_buf[2] = GET_SMILE_DETECTION_24CUG;
     
-    bool fetched =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+    bool fetched =    sendHidCmd( "GET_SMILE_DETECTION_24CUG"
+                                , g_out_packet_buf
+                                , g_in_packet_buf
+                                , BUFFER_LENGTH
+                                )
                    && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
-                   && g_in_packet_buf[1] == GET_SMILE_DETECTION
+                   && g_in_packet_buf[1] == GET_SMILE_DETECTION_24CUG
                    && g_in_packet_buf[6] == GET_SUCCESS;
     
     if ( fetched ) [[  likely]]
@@ -1834,13 +1939,17 @@ bool See3CAM_24CUG::applySmileDetectMode()
     initializeBuffers();
     
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
-    g_out_packet_buf[2] = SET_SMILE_DETECTION;
+    g_out_packet_buf[2] = SET_SMILE_DETECTION_24CUG;
     g_out_packet_buf[3] = enum_integer(smileDetectMode.value());
     g_out_packet_buf[5] = enum_integer(smileEmbedMode .value());
     
-    bool applied =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+    bool applied =    sendHidCmd( "SET_SMILE_DETECTION_24CUG"
+                                , g_out_packet_buf
+                                , g_in_packet_buf
+                                , BUFFER_LENGTH
+                                )
                    && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
-                   && g_in_packet_buf[1] == SET_SMILE_DETECTION
+                   && g_in_packet_buf[1] == SET_SMILE_DETECTION_24CUG
                    && g_in_packet_buf[6] == SET_SUCCESS;
     
     if ( !applied ) [[unlikely]]
@@ -1900,7 +2009,11 @@ bool See3CAM_24CUG::fetchFlickerDetectMode()
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
     g_out_packet_buf[2] = GET_FLICKER_CONRTOL_24CUG;
     
-    bool fetched =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+    bool fetched =    sendHidCmd( "GET_FLICKER_CONRTOL_24CUG"
+                                , g_out_packet_buf
+                                , g_in_packet_buf
+                                , BUFFER_LENGTH
+                                )
                    && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
                    && g_in_packet_buf[1] == GET_FLICKER_CONRTOL_24CUG
                    && g_in_packet_buf[6] == GET_SUCCESS;
@@ -1932,7 +2045,11 @@ bool See3CAM_24CUG::applyFlickerDetectMode()
     g_out_packet_buf[2] = SET_FLICKER_CONTROL_24CUG;
     g_out_packet_buf[3] = enum_integer(flickerDetectMode.value());
     
-    bool applied =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+    bool applied =    sendHidCmd( "SET_FLICKER_CONTROL_24CUG"
+                                , g_out_packet_buf
+                                , g_in_packet_buf
+                                , BUFFER_LENGTH
+                                )
                    && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
                    && g_in_packet_buf[1] == SET_FLICKER_CONTROL_24CUG
                    && g_in_packet_buf[6] == SET_SUCCESS;
@@ -1993,7 +2110,11 @@ bool See3CAM_24CUG::fetchFlashMode()
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
     g_out_packet_buf[2] = GET_STROBE_CONTROL_24CUG;
     
-    bool fetched =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+    bool fetched =    sendHidCmd( "GET_STROBE_CONTROL_24CUG"
+                                , g_out_packet_buf
+                                , g_in_packet_buf
+                                , BUFFER_LENGTH
+                                )
                    && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
                    && g_in_packet_buf[1] == GET_STROBE_CONTROL_24CUG
                    && g_in_packet_buf[6] == GET_SUCCESS;
@@ -2025,7 +2146,11 @@ bool See3CAM_24CUG::applyFlashMode()
     g_out_packet_buf[2] = SET_STROBE_CONTROL_24CUG;
     g_out_packet_buf[3] = enum_integer(flashMode.value());
     
-    bool applied =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+    bool applied =    sendHidCmd( "SET_STROBE_CONTROL_24CUG"
+                                , g_out_packet_buf
+                                , g_in_packet_buf
+                                , BUFFER_LENGTH
+                                )
                    && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
                    && g_in_packet_buf[1] == SET_STROBE_CONTROL_24CUG
                    && g_in_packet_buf[6] == SET_SUCCESS;
@@ -2096,7 +2221,11 @@ bool See3CAM_24CUG::fetchStreamMode()
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
     g_out_packet_buf[2] = GET_STREAM_MODE_24CUG;
 
-    bool fetched =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+    bool fetched =    sendHidCmd( "GET_STREAM_MODE_24CUG"
+                                , g_out_packet_buf
+                                , g_in_packet_buf
+                                , BUFFER_LENGTH
+                                )
                    && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
                    && g_in_packet_buf[1] == GET_STREAM_MODE_24CUG
                    && g_in_packet_buf[6] == GET_SUCCESS;
@@ -2134,7 +2263,11 @@ bool See3CAM_24CUG::applyStreamMode()
     g_out_packet_buf[3] = enum_integer(streamMode.value());
     g_out_packet_buf[4] = streamModeFunctionLock.value();
     
-    bool applied =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+    bool applied =    sendHidCmd( "SET_STREAM_MODE_24CUG"
+                                , g_out_packet_buf
+                                , g_in_packet_buf
+                                , BUFFER_LENGTH
+                                )
                    && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
                    && g_in_packet_buf[1] == SET_STREAM_MODE_24CUG
                    && g_in_packet_buf[6] == SET_SUCCESS;
@@ -2156,6 +2289,56 @@ bool See3CAM_24CUG::applyStreamMode()
 
 
 
+bool See3CAM_24CUG::giveFWVersion( uint16_t& major
+                                 , uint16_t& minor1
+                                 , uint16_t& minor2
+                                 , uint16_t& minor3
+                                 )
+{
+    if (    !fwVersionMajor .has_value()
+         || !fwVersionMinor1.has_value()
+         || !fwVersionMinor2.has_value()
+         || !fwVersionMinor3.has_value()
+       ) [[unlikely]]
+        return false;
+    
+    major  = fwVersionMajor .value();
+    minor1 = fwVersionMinor1.value();
+    minor2 = fwVersionMinor2.value();
+    minor3 = fwVersionMinor3.value();
+    
+    return true;
+}
+
+bool See3CAM_24CUG::fetchFWVersion()
+{
+    initializeBuffers();
+    
+    g_out_packet_buf[1] = GET_FIRMWARE_VERSION_24CUG;
+    
+    bool fetched =    sendHidCmd( "GET_FIRMWARE_VERSION_24CUG"
+                                , g_out_packet_buf
+                                , g_in_packet_buf
+                                , BUFFER_LENGTH
+                                )
+                   && g_in_packet_buf[0] == GET_FIRMWARE_VERSION_24CUG;
+    
+    if ( fetched ) { fwVersionMajor  =  g_in_packet_buf[1];
+                     fwVersionMinor1 =  g_in_packet_buf[2];
+                     fwVersionMinor2 = (g_in_packet_buf[3]<<8)+g_in_packet_buf[4];
+                     fwVersionMinor3 = (g_in_packet_buf[5]<<8)+g_in_packet_buf[6];
+                   }
+    else           { fwVersionMajor .reset();
+                     fwVersionMinor1.reset();
+                     fwVersionMinor2.reset();
+                     fwVersionMinor3.reset();
+                   }
+    
+    return fetched;
+}
+
+
+
 bool See3CAM_24CUG::setToDefault()
 {
     initializeBuffers();
@@ -2163,7 +2346,11 @@ bool See3CAM_24CUG::setToDefault()
     g_out_packet_buf[1] = CAMERA_CONTROL_24CUG;
     g_out_packet_buf[2] = SET_TO_DEFAULT_24CUG;
     
-    bool applied =    sendHidCmd(g_out_packet_buf, g_in_packet_buf, BUFFER_LENGTH)
+    bool applied =    sendHidCmd( "SET_TO_DEFAULT_24CUG"
+                                , g_out_packet_buf
+                                , g_in_packet_buf
+                                , BUFFER_LENGTH
+                                )
                    && g_in_packet_buf[0] == CAMERA_CONTROL_24CUG
                    && g_in_packet_buf[1] == SET_TO_DEFAULT_24CUG
                    && g_in_packet_buf[6] == SET_SUCCESS;
