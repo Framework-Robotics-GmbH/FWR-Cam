@@ -79,12 +79,78 @@ std::string_view to_string_view(ErrorAction ea) noexcept
 
 std::string_view to_string_view(PixelFormat pf) noexcept
 {
-    return enum_name(pf);
+    switch ( pf )
+    {
+        case PixelFormat::INVALID: return "INVALID";
+        case PixelFormat::RGB332 : return "RGB332" ;
+        case PixelFormat::RGB565 : return "RGB565" ;
+        case PixelFormat::RGB24  : return "RGB24"  ;
+        case PixelFormat::RGB32  : return "RGB32"  ;
+        case PixelFormat::GREY   : return "GREY"   ;
+        case PixelFormat::YUYV   : return "YUYV"   ;
+        case PixelFormat::UYVY   : return "UYVY"   ;
+        case PixelFormat::MJPEG  : return "MJPEG"  ;
+        case PixelFormat::H264   : return "H264"   ;
+        case PixelFormat::NV12   : return "NV12"   ;
+        case PixelFormat::NV21   : return "NV21"   ;
+        case PixelFormat::YUV420 : return "YUV420" ;
+        case PixelFormat::YVU420 : return "YVU420" ;
+        
+        default:
+            return "<unknown enumerator>";
+    }
 }
 
 uint32_t to_integer(PixelFormat pf) noexcept
 {
-    return enum_integer(pf);
+    uint32_t ui = static_cast<uint32_t>(pf);
+    
+    switch ( pf )
+    {
+        case PixelFormat::INVALID: [[fallthrough]];
+        case PixelFormat::RGB332 : [[fallthrough]];
+        case PixelFormat::RGB565 : [[fallthrough]];
+        case PixelFormat::RGB24  : [[fallthrough]];
+        case PixelFormat::RGB32  : [[fallthrough]];
+        case PixelFormat::GREY   : [[fallthrough]];
+        case PixelFormat::YUYV   : [[fallthrough]];
+        case PixelFormat::UYVY   : [[fallthrough]];
+        case PixelFormat::MJPEG  : [[fallthrough]];
+        case PixelFormat::H264   : [[fallthrough]];
+        case PixelFormat::NV12   : [[fallthrough]];
+        case PixelFormat::NV21   : [[fallthrough]];
+        case PixelFormat::YUV420 : [[fallthrough]];
+        case PixelFormat::YVU420 : return ui;
+        
+        default:
+            return uint32_t{};
+    }
+}
+
+PixelFormat to_PixelFormat(uint32_t ui) noexcept
+{
+    PixelFormat pf = static_cast<PixelFormat>(ui);
+    
+    switch ( pf )
+    {
+        case PixelFormat::INVALID: [[fallthrough]];
+        case PixelFormat::RGB332 : [[fallthrough]];
+        case PixelFormat::RGB565 : [[fallthrough]];
+        case PixelFormat::RGB24  : [[fallthrough]];
+        case PixelFormat::RGB32  : [[fallthrough]];
+        case PixelFormat::GREY   : [[fallthrough]];
+        case PixelFormat::YUYV   : [[fallthrough]];
+        case PixelFormat::UYVY   : [[fallthrough]];
+        case PixelFormat::MJPEG  : [[fallthrough]];
+        case PixelFormat::H264   : [[fallthrough]];
+        case PixelFormat::NV12   : [[fallthrough]];
+        case PixelFormat::NV21   : [[fallthrough]];
+        case PixelFormat::YUV420 : [[fallthrough]];
+        case PixelFormat::YVU420 : return pf;
+        
+        default:
+            return PixelFormat::INVALID;
+    }
 }
 
 // only bumps up
@@ -3254,7 +3320,7 @@ void V4L2Cam::updateResNPixFmtFromDeviceInfo(v4l2_format const& format) noexcept
             if ( !checkResolution(format.fmt.pix_mp.width, format.fmt.pix_mp.height) )
             [[unlikely]]
                 clog << "V4L2Cam::updateResNPixFmtFromDeviceInfo: resolution "
-                        " reported by device not valid according to our domain "
+                        "reported by device not valid according to our domain "
                         "knowledge!"
                      << endl;
         }
@@ -3265,11 +3331,11 @@ void V4L2Cam::updateResNPixFmtFromDeviceInfo(v4l2_format const& format) noexcept
             resolutionSource = ssrc::NONE;
         }
         
-        pixelFormat = enum_cast<PixelFormat>(format.fmt.pix_mp.pixelformat);
+        pixelFormat = to_PixelFormat(format.fmt.pix_mp.pixelformat);
         
         if ( !pixelFormat && format.fmt.pix_mp.pixelformat > 0 ) [[unlikely]]
             clog << "V4L2Cam::updateResNPixFmtFromDeviceInfo: pixel format "
-                    " reported by device not valid according to our domain "
+                    "reported by device not valid according to our domain "
                     "knowledge!"
                  << endl;
         
@@ -3296,7 +3362,7 @@ void V4L2Cam::updateResNPixFmtFromDeviceInfo(v4l2_format const& format) noexcept
             if ( !checkResolution(format.fmt.pix.width, format.fmt.pix.height) )
             [[unlikely]]
                 clog << "V4L2Cam::updateResNPixFmtFromDeviceInfo: resolution "
-                        " reported by device not valid according to our domain "
+                        "reported by device not valid according to our domain "
                         "knowledge!"
                      << endl;
         }
@@ -3307,11 +3373,11 @@ void V4L2Cam::updateResNPixFmtFromDeviceInfo(v4l2_format const& format) noexcept
             resolutionSource = ssrc::NONE;
         }
         
-        pixelFormat = enum_cast<PixelFormat>(format.fmt.pix.pixelformat);
+        pixelFormat = to_PixelFormat(format.fmt.pix.pixelformat);
         
         if ( !pixelFormat && format.fmt.pix_mp.pixelformat > 0 ) [[unlikely]]
             clog << "V4L2Cam::updateResNPixFmtFromDeviceInfo: pixel format "
-                    " reported by device not valid according to our domain "
+                    "reported by device not valid according to our domain "
                     "knowledge!"
                  << endl;
         

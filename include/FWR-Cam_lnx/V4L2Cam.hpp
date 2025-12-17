@@ -86,6 +86,7 @@ enum class PixelFormat : uint32_t
 
 std::string_view to_string_view(PixelFormat pf) noexcept;
 uint32_t         to_integer    (PixelFormat pf) noexcept;
+PixelFormat      to_PixelFormat(uint32_t    ui) noexcept;
 
 
 enum class PowerLineFrequency : uint8_t

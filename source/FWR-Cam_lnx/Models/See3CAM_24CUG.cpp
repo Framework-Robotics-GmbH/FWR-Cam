@@ -176,16 +176,12 @@ bool See3CAM_24CUG::_locateDeviceNodeAndInitialize( udev       * uDev
 
         if ( fd < 0 ) {
             clog << "See3CAM_24CUG::_locateDeviceNodeAndInitialize: Could not "
-                    "open hidraw device path"
+                    "open hidraw device path: " << dev_path << "!"
                  << endl;
             
             udev_device_unref(dev);
             continue;
         }
-        else
-            clog << "See3CAM_24CUG::_locateDeviceNodeAndInitialize: hid fd: "
-                 << to_string((int32_t)fd)
-                 << endl;
         
         hidPath = dev_path;
         
@@ -200,11 +196,11 @@ bool See3CAM_24CUG::_locateDeviceNodeAndInitialize( udev       * uDev
                       + to_string(fwVersionMinor2.value()) + "."
                       + to_string(fwVersionMinor3.value());
         }
-            
         
-        clog << "See3Cam24CugNode::_locateDeviceNodeAndInitialize: found ..."
-             << "\n    hidFD           : " << to_string((int32_t)*v4l2FD)
-             << "\n    hidPath         : " << v4l2Path
+        
+        clog << "See3CAM_24CUG::_locateDeviceNodeAndInitialize: found ..."
+             << "\n    hidFD           : " << to_string((int32_t)*hidFD)
+             << "\n    hidPath         : " << hidPath
              << "\n    firmware version: " << fwVersion
              << endl;
         
