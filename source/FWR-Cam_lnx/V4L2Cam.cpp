@@ -488,6 +488,20 @@ bool V4L2Cam::locateDeviceNodeAndInitialize()
         if ( devnum ) USBDeviceAddress = devnum;
         else          USBDeviceAddress.clear();
         
+        if ( !USBKernelName.empty() ) [[  likely]]
+        {
+            const char* syspath = udev_device_get_syspath(pdev);
+            string_view sv_path = syspath;
+            
+            auto const pos = sv_path.find(USBKernelName);
+            
+            string_view const pPath = pos != string_view::npos
+                                    ? string_view(syspath).substr(0, pos)
+                                    : "/sys/bus/usb/devices";
+            
+            findDisableFSNode(pPath, USBKernelName);
+        }
+        
         // resetCrop(fd);
         
         v4l2FD = make_shared<FD_t>(move(fd));
@@ -565,6 +579,114 @@ bool V4L2Cam::locateDeviceNodeAndInitialize()
     }
     
     return state == State::INITIALIZED;
+}
+
+bool V4L2Cam::splitUsbSysname( string_view const  cur
+                             , string           & parent
+                             , int              & port
+                             )
+{
+    // cur formats: "1-2" or "1-2.3.4"
+    // parent:      "usb1" (for root hub case) or "1-2.3"
+    // port:        last hop port number
+    
+    auto const dash = cur.find('-');
+    
+    if ( dash == string_view::npos )
+        return false;
+    
+    auto const dot = cur.rfind('.');
+    
+    if ( dot != string_view::npos )
+    {
+        // parent is everything before last dot
+        parent = cur.substr(0, dot);
+        port   = stoi(string(cur.substr(dot + 1)));
+        
+        return true;
+    }
+    
+    // No dot => form "bus-port"
+    // parent hub is the root hub "usb<bus>"
+    parent = string("usb") + string(cur.substr(0, dash));
+    port   = stoi(string(cur.substr(dash + 1)));
+    
+    return true;
+}
+
+void V4L2Cam::findDisableFSNode( fs::path      sysBusUSBDevices
+                               , string const& usbSysName
+                               )
+{
+    USBPortDisablePathSelf.clear();
+    USBPortDisablePathPeer.clear();
+    
+    error_code ec{};
+    
+    // sysBusUSBDevices should be "/sys/bus/usb/devices"
+    // usbSysName e.g. "1-2.3.4"
+    
+    string cur = usbSysName;
+    
+    while ( true )
+    {
+        string parent;
+        int port = -1;
+        
+        if ( !splitUsbSysname(cur, parent, port))
+            break;
+        
+        fs::path hubInterfaceDir;
+        
+        if ( parent.rfind("usb", 0) == 0)
+        {
+            // Root hub interface is typically "<bus>-0:1.0", bus is after "usb"
+            string const busStr = parent.substr(3);
+            hubInterfaceDir = sysBusUSBDevices / ( busStr + "-0:1.0" );
+        }
+        else
+        {
+            hubInterfaceDir = sysBusUSBDevices / ( parent + ":1.0" );
+        }
+        
+        fs::path const disablePath = hubInterfaceDir
+                                   / ( parent + "-port" + to_string(port) )
+                                   / "disable";
+        
+        if ( fs::exists(disablePath) )
+        {
+            USBPortDisablePathSelf = fs::canonical(disablePath, ec);
+            
+            if ( ec ) [[unlikely]] USBPortDisablePathSelf = disablePath;
+            
+            break;
+        }
+        
+        cur = parent;
+    }
+    
+    if ( USBPortDisablePathSelf.empty() )
+        return;
+    
+    fs::path peerPath = USBPortDisablePathSelf.parent_path() / "peer";
+    
+    if ( fs::exists(peerPath) )
+    {
+        peerPath /= "disable";
+        
+        if ( fs::exists(peerPath) ) [[  likely]]
+        {
+            USBPortDisablePathPeer = fs::canonical(peerPath, ec);
+            
+            if ( ec ) [[unlikely]] USBPortDisablePathPeer = peerPath;
+            
+            return;
+        }
+        
+        clog << "V4L2Cam::findDisableFSNode: found parent port with disable "
+                "attribute and peer, but peer don't have disable!"
+             << endl;
+    }
 }
 
 
@@ -1426,9 +1548,11 @@ bool V4L2Cam::resetDevice() noexcept
         return false;
     }
     
-    storedUSBID.kernelName    = USBKernelName;
-    storedUSBID.busNumber     = USBBusNumber;
-    storedUSBID.deviceAddress = USBDeviceAddress;
+    storedUSBID.kernelName             = USBKernelName;
+    storedUSBID.busNumber              = USBBusNumber;
+    storedUSBID.deviceAddress          = USBDeviceAddress;
+    storedUSBID.portDisablePathSelf = USBPortDisablePathSelf;
+    storedUSBID.portDisablePathPeer = USBPortDisablePathPeer;
     
     tryAndStopStreaming();
     uninitialize(true);
@@ -1449,7 +1573,7 @@ RESET_DEVICE_ESCALATE_MEASURES:
         lastResetMeasure = ResetMeasure::USB_IFACE_REBIND;
         reinitInterval   = chrono::milliseconds{ 200};
         reinitTimeout    = chrono::milliseconds{2000};
-        didReset         = rebindUSBDevice(storedUSBID.kernelName);
+        didReset         = rebindUSBDevice();
     }
     if (    !didReset
          &&  lastResetMeasure == ResetMeasure::USB_IFACE_REBIND
@@ -1461,9 +1585,7 @@ RESET_DEVICE_ESCALATE_MEASURES:
         lastResetMeasure = ResetMeasure::USB_DEVFS_RESET;
         reinitInterval   = chrono::milliseconds{ 400};
         reinitTimeout    = chrono::milliseconds{5000};
-        didReset         = resetUSBDevice( storedUSBID.busNumber
-                                         , storedUSBID.deviceAddress
-                                         );
+        didReset         = resetUSBDevice();
     }
 //     if (    !didReset
 //          &&  lastResetMeasure == ResetMeasure::USB_DEVFS_RESET
@@ -1475,10 +1597,7 @@ RESET_DEVICE_ESCALATE_MEASURES:
 //         lastResetMeasure = ResetMeasure::USB_PORT_RESET;
 //         reinitInterval   = chrono::milliseconds{ 400};
 //         reinitTimeout    = chrono::milliseconds{5000};
-//         didReset         = resetAtUSBHubPort( storedUSBID.busNumber
-//                                             , storedUSBID.deviceAddress
-//                                             , false
-//                                             );
+//         didReset         = resetAtUSBHubPort();
 //     }
     if (    !didReset
          // &&  lastResetMeasure == ResetMeasure::USB_PORT_RESET
@@ -1494,10 +1613,9 @@ RESET_DEVICE_ESCALATE_MEASURES:
             reinitInterval   = chrono::milliseconds{ 500};
             reinitTimeout    = chrono::milliseconds{8000};
             // TODO *untested*
-            didReset         = resetAtUSBHubPort( storedUSBID.busNumber
-                                                , storedUSBID.deviceAddress
-                                                // , true
-                                                );
+            didReset         = powerCycleUSBDevice();
+            // TODO *untested*
+            // didReset         = resetAtUSBHubPort();
         }
         else // can only request higher-ups to do the power cycling
         {
@@ -1958,6 +2076,57 @@ int32_t V4L2Cam::xopen( char    const* pathname
     }
     
     return fd;
+}
+
+bool V4L2Cam::xwrite( int         fd
+                    , char const* str
+                    , size_t      len
+                    )
+{
+    using namespace chrono;
+    
+    size_t written_bytes{};
+    
+    while ( written_bytes < len )
+    {
+        ssize_t result = write( fd
+                              , str + written_bytes
+                              , len - written_bytes
+                              );
+        
+        if ( result < 0 )
+        {
+            int const errNo = errno;
+            
+            if ( errNo == EINTR || errNo == EAGAIN )
+            {
+                this_thread::sleep_for(milliseconds(1));
+                continue;
+            }
+            else if ( errNo == EIO )
+            {
+                clog << "V4L2Cam.cpp, xwrite(): Write I/O error: "
+                     << strerror(errNo)
+                     << endl;
+                
+                errno = errNo;
+                return false;
+            }
+            else
+            {
+                clog << "V4L2Cam.cpp, xwrite(): Write error: "
+                     << strerror(errNo)
+                     << endl;
+                
+                errno = errNo;
+                return false;
+            }
+        }
+        
+        written_bytes += result;
+    }
+    
+    return true;
 }
 
 
@@ -2471,6 +2640,8 @@ void V4L2Cam::uninitialize(bool hard) noexcept
     USBKernelName.clear();
     USBBusNumber.clear();
     USBDeviceAddress.clear();
+    USBPortDisablePathSelf.clear();
+    USBPortDisablePathPeer.clear();
     
     state = state == State::UNINITIALIZED
           ? State::UNINITIALIZED
@@ -2481,11 +2652,11 @@ void V4L2Cam::uninitialize(bool hard) noexcept
     bufferPlanes      = {};
 }
 
-bool V4L2Cam::rebindUSBDevice(string const& usbKernelName) noexcept
+bool V4L2Cam::rebindUSBDevice() noexcept
 {
     namespace fs = std::filesystem;
     
-    fs::path const devDir{"/sys/bus/usb/devices/" + usbKernelName};
+    fs::path const devDir{"/sys/bus/usb/devices/" + storedUSBID.kernelName};
     
     if ( !fs::exists(devDir) )
     {
@@ -2510,7 +2681,7 @@ bool V4L2Cam::rebindUSBDevice(string const& usbKernelName) noexcept
         
         auto const name = entry.path().filename().string(); // maybe "2-2:1.0"
         
-        if ( name.rfind(usbKernelName + ":", 0) != 0 )
+        if ( name.rfind(storedUSBID.kernelName + ":", 0) != 0 )
             continue; // not an interface
         
         fs::path driverLink = entry.path() / "driver";
@@ -2636,17 +2807,15 @@ bool V4L2Cam::rebindUSBDevice(string const& usbKernelName) noexcept
 }
 
 
-bool V4L2Cam::resetUSBDevice( string const& usbBusNumber
-                            , string const& usbDeviceAddress
-                            ) noexcept
+bool V4L2Cam::resetUSBDevice() noexcept
 {
     // /dev/bus/usb/%03u/%03u (padded)
     char path[64]{};
     std::snprintf( path
                  , sizeof(path)
                  , "/dev/bus/usb/%03lu/%03lu"
-                 , std::stoul(usbBusNumber)
-                 , std::stoul(usbDeviceAddress)
+                 , std::stoul(storedUSBID.busNumber)
+                 , std::stoul(storedUSBID.deviceAddress)
                  );
 
     FD_t fd{xopen(path, O_RDWR)};
@@ -2674,125 +2843,196 @@ bool V4L2Cam::resetUSBDevice( string const& usbBusNumber
 }
 
 
-bool V4L2Cam::resetAtUSBHubPort( string const& usbBusNumber
-                               , string const& usbDeviceAddress
-                               // , bool          powerCycle
-                               ) noexcept
+bool V4L2Cam::powerCycleUSBDevice() noexcept
 {
-    libusb_context*          ctx        = nullptr;
-    libusb_device_handle*    hub_handle = nullptr;
-    // libusb_device_descriptor hub_desc{};
-    uint8_t                  port{};
-    
-    bool success{true};
-    
-    int32_t res = libusb_init(&ctx);
-    
-    if ( res < 0 )
+    if ( storedUSBID.portDisablePathSelf.empty() ) [[unlikely]]
     {
-        clog << "V4L2Cam::resetAtUSBPort: Failed to initialize libusb: "
-             << libusb_error_name(res)
+        clog << "V4L2Cam::powerCycleUSBDevice: no disable path to write \"1\" to!"
              << endl;
         
         return false;
     }
     
-    success &= produceHubHandleAndPortNumber( usbBusNumber
-                                            , usbDeviceAddress
-                                            , ctx
-                                            , hub_handle
-                                            // , hub_desc
-                                            , port
-                                            );
-    
-    constexpr uint16_t PORT_POWER       = 8;
-    // constexpr uint16_t PORT_RESET       = 4;
-    constexpr uint8_t  REQTYPE_PORT_OUT = static_cast<uint8_t>(LIBUSB_ENDPOINT_OUT      )
-                                        | static_cast<uint8_t>(LIBUSB_REQUEST_TYPE_CLASS)
-                                        | static_cast<uint8_t>(LIBUSB_RECIPIENT_OTHER   );
-    
-    if ( !success ) [[unlikely]]
+    array<fs::path const*, 2> const usbPortDisableFiles
     {
-        clog << "V4L2Cam::resetAtUSBPort: couldn't identify device's hub and "
-                "port!"
+        &storedUSBID.portDisablePathSelf,
+        &storedUSBID.portDisablePathPeer
+    };
+    
+    size_t turnedOffCount{};
+    size_t      portCount = (   storedUSBID.portDisablePathPeer.empty()
+                              ? 1
+                              : 2
+                            );
+    
+    for ( size_t i{}; i < portCount; ++i)
+    {
+        auto const* path = usbPortDisableFiles[i]->c_str();
+        
+        int  fd    = xopen(path, O_WRONLY | O_CLOEXEC);
+        auto errNo = errno;
+        
+        if ( fd < 0 ) [[unlikely]]
+        {
+            clog << "V4L2Cam::powerCycleUSBDevice: opening \""
+                 << path << "\" failed: " << strerror( errNo )
+                 << endl;
+            
+            break;
+        }
+
+        char   const* val = "1\n";
+        size_t const  len = strlen(val);
+        
+        if ( !xwrite(fd, val, len) ) [[unlikely]]
+        {
+            clog << "V4L2Cam::powerCycleUSBDevice: writing to \""
+                 << path << "\" failed: "
+                 << strerror( errNo ) << '\n';
+            
+            ::close( fd );
+            
+            break;
+        }
+
+        ::close( fd );
+        
+        ++turnedOffCount;
+    }
+    
+    clog << "V4L2Cam::powerCycleUSBDevice: pulled power down on"
+         << to_string(turnedOffCount) << " ports of "
+         << to_string(portCount)
+         << endl;
+    
+    
+    // HACK should check power status of one of the ports to make sure, but can't
+    // be bothered, right now
+    
+    this_thread::sleep_for(chrono::milliseconds(750));
+    
+    
+    size_t turnedOnCount{};
+    
+    for ( size_t i{}; i < turnedOffCount; ++i )
+    {
+        auto const* path = usbPortDisableFiles[i]->c_str();
+        
+        int  fd    = xopen(usbPortDisableFiles[i]->c_str(), O_WRONLY | O_CLOEXEC);
+        auto errNo = errno;
+        
+        if ( fd < 0 ) [[unlikely]]
+        {
+            clog << "V4L2Cam::powerCycleUSBDevice: opening \""
+                 << path << "\" failed: " << strerror( errNo )
+                 << endl;
+            
+            continue;
+        }
+
+        char   const* val = "0\n";
+        size_t const  len = strlen(val);
+        
+        if ( !xwrite(fd, val, len) ) [[unlikely]]
+        {
+            clog << "V4L2Cam::powerCycleUSBDevice: writing to \""
+                 << path << "\" failed: "
+                 << strerror( errNo ) << '\n';
+            
+            ::close( fd );
+            
+            continue;
+        }
+
+        ::close( fd );
+        
+        ++turnedOnCount;
+    }
+    
+    clog << "V4L2Cam::powerCycleUSBDevice: pulled power up   on "
+         << to_string(turnedOnCount) << " ports of "
+         << to_string(portCount)
+         << endl;
+    
+    if ( turnedOnCount < turnedOffCount ) [[unlikely]]
+    {
+        clog << "V4L2Cam::powerCycleUSBDevice: left ports "
+                "powered down! (logically that is)"
              << endl;
-        
-        goto RESET_AT_USB_PORT_END;
     }
     
-    // if ( powerCycle )
-    {
-        res = libusb_control_transfer( hub_handle
-                                     , REQTYPE_PORT_OUT
-                                     , LIBUSB_REQUEST_CLEAR_FEATURE
-                                     , PORT_POWER
-                                     , port
-                                     , NULL
-                                     , 0
-                                     , 1000
-                                     );
-        success &= res >= 0;
-        
-        if ( !success ) [[unlikely]]
-        {
-            clog << "V4L2Cam::resetAtUSBPort: Failed to power off the device:"
-                 << libusb_error_name(res)
-                 << endl;
-            
-            goto RESET_AT_USB_PORT_END;
-        }
-        
-        this_thread::sleep_for(chrono::milliseconds(750));
-        
-        
-        static constexpr uint8_t max_attempts{10};
-        uint8_t                  attempt{};
-        auto                     sleep_base = chrono::milliseconds(200);
-        auto                     backoff    = chrono::milliseconds( 50);
-        
-        success = false;
-        
-        do {
-            this_thread::sleep_for(sleep_base + backoff);
-            
-            res = libusb_control_transfer( hub_handle
-                                         , REQTYPE_PORT_OUT
-                                         , LIBUSB_REQUEST_SET_FEATURE
-                                         , PORT_POWER
-                                         , port
-                                         , NULL
-                                         , 0
-                                         , 1000
-                                         );
-            success |= res >= 0;
-            
-            ++attempt;
-            
-            if ( backoff < chrono::milliseconds(800) )
-                backoff *= 2;
-        }
-        while (    !success
-                &&  attempt < max_attempts
-              );
-        
-        if ( !success )
-        {
-            clog << "V4L2Cam::resetAtUSBPort: Failed to power on the device:"
-                 << libusb_error_name(res)
-                 << endl;
-            
-            goto RESET_AT_USB_PORT_END;
-        }
-        
-        // Give the link time to debounce and enumerate a bit.
-        this_thread::sleep_for(chrono::milliseconds(1200));
-    }
-//     else /* just reset */
+    if (    turnedOffCount == portCount
+         && turnedOnCount  == 0
+       ) [[unlikely]]
+       clog << "V4L2Cam::powerCycleUSBDevice: left all ports "
+               "powered down! (actually)"
+            << endl;
+    
+    
+    // all pulled down := they actually lost power
+    // at least one up := they all have power
+    bool cycled =    turnedOffCount == portCount
+                  && turnedOnCount   > 0;
+    
+    if ( cycled )
+        this_thread::sleep_for(chrono::milliseconds(2000));
+    
+    return cycled;
+}
+
+
+// bool V4L2Cam::resetAtUSBHubPort( string const& usbBusNumber
+//                                , string const& usbDeviceAddress
+//                                // , bool          powerCycle
+//                                ) noexcept
+// {
+//     libusb_context*          ctx        = nullptr;
+//     libusb_device_handle*    hub_handle = nullptr;
+//     // libusb_device_descriptor hub_desc{};
+//     uint8_t                  port{};
+//     
+//     bool success{true};
+//     
+//     int32_t res = libusb_init(&ctx);
+//     
+//     if ( res < 0 )
+//     {
+//         clog << "V4L2Cam::resetAtUSBPort: Failed to initialize libusb: "
+//              << libusb_error_name(res)
+//              << endl;
+//         
+//         return false;
+//     }
+//     
+//     success &= produceHubHandleAndPortNumber( usbBusNumber
+//                                             , usbDeviceAddress
+//                                             , ctx
+//                                             , hub_handle
+//                                             // , hub_desc
+//                                             , port
+//                                             );
+//     
+//     constexpr uint16_t PORT_POWER       = 8;
+//     // constexpr uint16_t PORT_RESET       = 4;
+//     constexpr uint8_t  REQTYPE_PORT_OUT = static_cast<uint8_t>(LIBUSB_ENDPOINT_OUT      )
+//                                         | static_cast<uint8_t>(LIBUSB_REQUEST_TYPE_CLASS)
+//                                         | static_cast<uint8_t>(LIBUSB_RECIPIENT_OTHER   );
+//     
+//     if ( !success ) [[unlikely]]
+//     {
+//         clog << "V4L2Cam::resetAtUSBPort: couldn't identify device's hub and "
+//                 "port!"
+//              << endl;
+//         
+//         goto RESET_AT_USB_PORT_END;
+//     }
+//     
+//     // if ( powerCycle )
 //     {
 //         res = libusb_control_transfer( hub_handle
 //                                      , REQTYPE_PORT_OUT
-//                                      , LIBUSB_REQUEST_SET_FEATURE
-//                                      , PORT_RESET
+//                                      , LIBUSB_REQUEST_CLEAR_FEATURE
+//                                      , PORT_POWER
 //                                      , port
 //                                      , NULL
 //                                      , 0
@@ -2802,114 +3042,181 @@ bool V4L2Cam::resetAtUSBHubPort( string const& usbBusNumber
 //         
 //         if ( !success ) [[unlikely]]
 //         {
-//             clog << "V4L2Cam::resetAtUSBPort: Failed to port reset on the device: "
+//             clog << "V4L2Cam::resetAtUSBPort: Failed to power off the device:"
 //                  << libusb_error_name(res)
 //                  << endl;
-// 
+//             
+//             goto RESET_AT_USB_PORT_END;
+//         }
+//         
+//         this_thread::sleep_for(chrono::milliseconds(750));
+//         
+//         
+//         static constexpr uint8_t max_attempts{10};
+//         uint8_t                  attempt{};
+//         auto                     sleep_base = chrono::milliseconds(200);
+//         auto                     backoff    = chrono::milliseconds( 50);
+//         
+//         success = false;
+//         
+//         do {
+//             this_thread::sleep_for(sleep_base + backoff);
+//             
+//             res = libusb_control_transfer( hub_handle
+//                                          , REQTYPE_PORT_OUT
+//                                          , LIBUSB_REQUEST_SET_FEATURE
+//                                          , PORT_POWER
+//                                          , port
+//                                          , NULL
+//                                          , 0
+//                                          , 1000
+//                                          );
+//             success |= res >= 0;
+//             
+//             ++attempt;
+//             
+//             if ( backoff < chrono::milliseconds(800) )
+//                 backoff *= 2;
+//         }
+//         while (    !success
+//                 &&  attempt < max_attempts
+//               );
+//         
+//         if ( !success )
+//         {
+//             clog << "V4L2Cam::resetAtUSBPort: Failed to power on the device:"
+//                  << libusb_error_name(res)
+//                  << endl;
+//             
 //             goto RESET_AT_USB_PORT_END;
 //         }
 //         
 //         // Give the link time to debounce and enumerate a bit.
-//         this_thread::sleep_for(chrono::milliseconds(400));
+//         this_thread::sleep_for(chrono::milliseconds(1200));
 //     }
-    
-    
-RESET_AT_USB_PORT_END:
-    
-    if ( hub_handle != nullptr )
-        libusb_close(hub_handle);
-    libusb_exit(ctx);
-    
-    return success;
-}
+// //     else /* just reset */
+// //     {
+// //         res = libusb_control_transfer( hub_handle
+// //                                      , REQTYPE_PORT_OUT
+// //                                      , LIBUSB_REQUEST_SET_FEATURE
+// //                                      , PORT_RESET
+// //                                      , port
+// //                                      , NULL
+// //                                      , 0
+// //                                      , 1000
+// //                                      );
+// //         success &= res >= 0;
+// //         
+// //         if ( !success ) [[unlikely]]
+// //         {
+// //             clog << "V4L2Cam::resetAtUSBPort: Failed to port reset on the device: "
+// //                  << libusb_error_name(res)
+// //                  << endl;
+// // 
+// //             goto RESET_AT_USB_PORT_END;
+// //         }
+// //         
+// //         // Give the link time to debounce and enumerate a bit.
+// //         this_thread::sleep_for(chrono::milliseconds(400));
+// //     }
+//     
+//     
+// RESET_AT_USB_PORT_END:
+//     
+//     if ( hub_handle != nullptr )
+//         libusb_close(hub_handle);
+//     libusb_exit(ctx);
+//     
+//     return success;
+// }
 
-bool V4L2Cam::produceHubHandleAndPortNumber( string const&           usbBusNumber
-                                           , string const&           usbDeviceAddress
-                                           , libusb_context *        ctx
-                                           , libusb_device_handle *& hub_handle
-                                           , uint8_t&                port
-                                           ) noexcept
-{
-    hub_handle = nullptr;
-    
-    bool found{false};
-    int res = 0;
-    libusb_device **dev_list = nullptr;
-    ssize_t cnt;
-    
-    uint8_t target_busnum = static_cast<uint8_t>(std::stoul(usbBusNumber));
-    uint8_t target_devnum = static_cast<uint8_t>(std::stoul(usbDeviceAddress));
-    
-    cnt = libusb_get_device_list(ctx, &dev_list);
-    
-    if ( cnt < 0 )
-    {
-        clog << "V4L2Cam::produceHubHandleAndPortNumber: Failed to get device "
-                "list: " << libusb_error_name(static_cast<int>(cnt))
-             << endl;
-        
-        return false;
-    }
-    
-    for ( ssize_t i = 0; i < cnt; i++ )
-    {
-        libusb_device* device = dev_list[i];
-        
-        if (    libusb_get_bus_number    (device) != target_busnum
-             || libusb_get_device_address(device) != target_devnum
-           )
-            continue;
-        
-        // Get the parent device (the hub)
-        libusb_device* parent = libusb_get_parent(device);
-        
-        if ( !parent )
-        {
-            clog << "V4L2Cam::produceHubHandleAndPortNumber: Failed to get "
-                    "parent device (hub)"
-                 << endl;
-            
-            break;
-        }
-        
-        res = libusb_open(parent, &hub_handle);
-        
-        if ( res < 0 )
-        {
-            clog << "V4L2Cam::produceHubHandleAndPortNumber: Failed to open "
-                    "hub device: " << libusb_error_name(res)
-                 << endl;
-            
-            break;
-        }
-        
-//         res = libusb_get_device_descriptor(parent, &hub_desc);
+// bool V4L2Cam::produceHubHandleAndPortNumber( string const&           usbBusNumber
+//                                            , string const&           usbDeviceAddress
+//                                            , libusb_context *        ctx
+//                                            , libusb_device_handle *& hub_handle
+//                                            , uint8_t&                port
+//                                            ) noexcept
+// {
+//     hub_handle = nullptr;
+//     
+//     bool found{false};
+//     int res = 0;
+//     libusb_device **dev_list = nullptr;
+//     ssize_t cnt;
+//     
+//     uint8_t target_busnum = static_cast<uint8_t>(std::stoul(usbBusNumber));
+//     uint8_t target_devnum = static_cast<uint8_t>(std::stoul(usbDeviceAddress));
+//     
+//     cnt = libusb_get_device_list(ctx, &dev_list);
+//     
+//     if ( cnt < 0 )
+//     {
+//         clog << "V4L2Cam::produceHubHandleAndPortNumber: Failed to get device "
+//                 "list: " << libusb_error_name(static_cast<int>(cnt))
+//              << endl;
 //         
-//         if ( res < 0 )
+//         return false;
+//     }
+//     
+//     for ( ssize_t i = 0; i < cnt; i++ )
+//     {
+//         libusb_device* device = dev_list[i];
+//         
+//         if (    libusb_get_bus_number    (device) != target_busnum
+//              || libusb_get_device_address(device) != target_devnum
+//            )
+//             continue;
+//         
+//         // Get the parent device (the hub)
+//         libusb_device* parent = libusb_get_parent(device);
+//         
+//         if ( !parent )
 //         {
-//             clog << "V4L2Cam::produceHubHandleAndPortNumber: Failed to get hub "
-//                     "descriptor: " << libusb_error_name(res)
+//             clog << "V4L2Cam::produceHubHandleAndPortNumber: Failed to get "
+//                     "parent device (hub)"
 //                  << endl;
-//                  
-//             libusb_close(hub_handle);
-//             hub_handle = nullptr;
 //             
 //             break;
 //         }
-        
-        port = libusb_get_port_number(device);
-        found = true;
-        break;
-    }
-    
-    libusb_free_device_list(dev_list, 1);
-    
-    if ( !found )
-        clog << "V4L2Cam::produceHubHandleAndPortNumber: Device not found"
-             << endl;
-    
-    return found;
-}
+//         
+//         res = libusb_open(parent, &hub_handle);
+//         
+//         if ( res < 0 )
+//         {
+//             clog << "V4L2Cam::produceHubHandleAndPortNumber: Failed to open "
+//                     "hub device: " << libusb_error_name(res)
+//                  << endl;
+//             
+//             break;
+//         }
+//         
+// //         res = libusb_get_device_descriptor(parent, &hub_desc);
+// //         
+// //         if ( res < 0 )
+// //         {
+// //             clog << "V4L2Cam::produceHubHandleAndPortNumber: Failed to get hub "
+// //                     "descriptor: " << libusb_error_name(res)
+// //                  << endl;
+// //                  
+// //             libusb_close(hub_handle);
+// //             hub_handle = nullptr;
+// //             
+// //             break;
+// //         }
+//         
+//         port = libusb_get_port_number(device);
+//         found = true;
+//         break;
+//     }
+//     
+//     libusb_free_device_list(dev_list, 1);
+//     
+//     if ( !found )
+//         clog << "V4L2Cam::produceHubHandleAndPortNumber: Device not found"
+//              << endl;
+//     
+//     return found;
+// }
 
 
 

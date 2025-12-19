@@ -16,6 +16,7 @@
 #include <vector>
 #include <string>
 #include <string_view>
+#include <filesystem>
 #include <optional>
 #include <memory>
 #include <utility>
@@ -58,9 +59,11 @@ std::string_view to_string_view(ErrorAction ea) noexcept;
 // to reinitialize, so user code can still retrieve it
 struct USBID
 {
-    std::string kernelName{};
-    std::string busNumber{};
-    std::string deviceAddress{};
+    std::string           kernelName{};
+    std::string           busNumber{};
+    std::string           deviceAddress{};
+    std::filesystem::path portDisablePathSelf{};
+    std::filesystem::path portDisablePathPeer{};
 };
 
 
@@ -200,6 +203,8 @@ struct V4L2CamData
     std::string              USBKernelName{};
     std::string              USBBusNumber{};
     std::string              USBDeviceAddress{};
+    std::filesystem::path    USBPortDisablePathSelf{};
+    std::filesystem::path    USBPortDisablePathPeer{};
     std::shared_ptr<FD_t>    v4l2FD{};
     std::shared_ptr<FD_t>    evntFD{};
     
@@ -343,6 +348,13 @@ public:
     void goIntoUninitializedState() noexcept;
     
     bool locateDeviceNodeAndInitialize();
+    static bool splitUsbSysname( std::string_view const  cur
+                               , std::string           & parent
+                               , int                   & port
+                               );
+    void findDisableFSNode( std::filesystem::path sysBusUsbDevices
+                          , std::string const&    usbSysname
+                          );
     
     bool usingMemoryType(MemoryType) noexcept;
     
@@ -418,6 +430,10 @@ protected:
     static int32_t xopen( char    const* pathname
                         , int32_t const  flags
                         );
+    static bool xwrite( int         fd
+                      , char const* str
+                      , size_t      len
+                      );
     
 private:
     virtual std::string_view const& _produceVendorID () noexcept = 0;
@@ -452,19 +468,17 @@ private:
     
     bool tryAndStopStreaming(bool hard = false) noexcept;
     
-    void      uninitialize(bool hard = false) noexcept;
-    bool   rebindUSBDevice( std::string const& usbKernelName     ) noexcept;
-    bool    resetUSBDevice( std::string const& usbBusNumber
-                          , std::string const& usbDeviceAddress  ) noexcept;
-    bool resetAtUSBHubPort( std::string const& usbBusNumber
-                          , std::string const& usbDeviceAddress
-                          /*, bool               powerCycle = false*/) noexcept;
-    bool produceHubHandleAndPortNumber( std::string const&      usbBusNumber
-                                      , std::string const&      usbDeviceAddress
-                                      , libusb_context *        ctx
-                                      , libusb_device_handle *& hub_handle
-                                      , uint8_t&                port
-                                      ) noexcept;
+    void        uninitialize(bool hard = false) noexcept;
+    bool     rebindUSBDevice() noexcept;
+    bool      resetUSBDevice() noexcept;
+    bool powerCycleUSBDevice() noexcept;
+    // bool resetAtUSBHubPort() noexcept;
+    // bool produceHubHandleAndPortNumber( std::string const&      usbBusNumber
+    //                                   , std::string const&      usbDeviceAddress
+    //                                   , libusb_context *        ctx
+    //                                   , libusb_device_handle *& hub_handle
+    //                                   , uint8_t&                port
+    //                                   ) noexcept;
     
     virtual void _uninitialize() = 0;
     
