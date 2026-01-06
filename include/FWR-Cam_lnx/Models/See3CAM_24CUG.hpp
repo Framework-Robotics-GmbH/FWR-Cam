@@ -1,6 +1,6 @@
 //------------------------------------------------------------------------------
 // FWR-Cam Library
-// Copyright (c) 2025 Framework Robotics GmbH
+// Copyright (c) 2026 Framework Robotics GmbH
 // 
 // Authors: Michael Lampert
 // 
