@@ -2995,7 +2995,7 @@ bool V4L2Cam::resetUSBDevice() noexcept
     }
     
     // Give the link time to debounce and enumerate a bit.
-    this_thread::sleep_for(chrono::milliseconds(2500));
+    this_thread::sleep_for(chrono::milliseconds(2000));
     
     return true;
 }
