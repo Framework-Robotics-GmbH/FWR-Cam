@@ -12,10 +12,11 @@
 
 #pragma once
 
-#include <array>
-#include <vector>
 #include <string>
 #include <string_view>
+#include <array>
+#include <vector>
+#include <unordered_map>
 #include <filesystem>
 #include <optional>
 #include <memory>
@@ -149,7 +150,7 @@ struct V4L2CamData
     struct FD_t
     {
         FD_t() = default;
-        explicit FD_t(int32_t fd) : value(fd) {}
+        explicit FD_t(int32_t fd) : value(fd) { incSFSCfor(*this); }
         
         FD_t(FD_t&& other) noexcept : value(std::exchange(other.value, -1)) {}
         FD_t& operator=(FD_t&& other) noexcept
@@ -179,14 +180,29 @@ struct V4L2CamData
                 close_fd();
                 value = new_fd;
             }
+            
+            incSFSCfor(*this);
+            
             return *this;
         }
         
         auto operator<=>(FD_t    const&  o) const { return value <=> o.value; }
         auto operator<=>(int32_t const  fd) const { return value <=> fd;      }
         
-        private:
-            int32_t value{-1};
+        static void  logSFSC() noexcept; // 
+        static bool warnSFSC() noexcept; // warns not all files closed, iff any counter != 0
+                                         // and returns true, iff so
+        
+    private:
+        // static file-specific counter
+        static void incSFSCfor(FD_t const& fd) noexcept;
+        static void decSFSCfor(FD_t const& fd) noexcept;
+        
+        static std::unordered_map<std::string, int32_t> sFSC;
+        static std::mutex                               sFSC_mtx;
+        
+        
+        int32_t value{-1};
     };
     
     V4L2CamData(std::string const& serialNo) noexcept;
@@ -463,7 +479,7 @@ private:
                            );
     
     std::shared_ptr<FD_t> produceV4L2FD();
-    bool                     openV4L2FD(); // locateDevice...() has that effect, too
+    // bool                     openV4L2FD(); // locateDevice...() has that effect, too
     void                    closeV4L2FD();
     
     bool tryAndStopStreaming(bool hard = false) noexcept;

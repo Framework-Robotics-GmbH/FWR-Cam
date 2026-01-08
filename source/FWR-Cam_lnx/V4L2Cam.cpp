@@ -161,21 +161,40 @@ static inline void update(ErrorAction& ea, ErrorAction val) noexcept
 }
 
 
-V4L2CamData::V4L2CamData(string const& sNo) noexcept
- :  serialNo(sNo)
- ,  evntFD(make_shared<FD_t>(eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC)))
-{
-    if ( !evntFD ) [[unlikely]]
-        clog << "V4L2CamData::V4L2CamData: Failed to create eventfd!!!"
-             << endl;
-}
 
+static string retrieve_fd_path(int const fd)
+{
+    array<char, PATH_MAX> buf{};
+    array<char, 64      > link{};
+    
+    int len = ::snprintf(link.data(), link.size(), "/proc/self/fd/%d", fd);
+    
+    if (    len <= 0
+         || len >= static_cast<int>(link.size())
+       ) [[unlikely]]
+        return {};
+    
+    ssize_t r = ::readlink(link.data(), buf.data(), buf.size() - 1);
+    
+    if ( r < 0 ) [[unlikely]]
+        return {};
+    
+    buf[r] = '\0';
+    
+    return string(buf.data());
+}
 
 void V4L2CamData::FD_t::close_fd()
 {
     constexpr int32_t retry_count = 10;
-    int32_t delay_ms = 1;
     
+    if ( value == -1 )
+        return;
+    
+    // const string path = retrieve_fd_path(value);
+    decSFSCfor(*this);
+    
+    int32_t delay_ms = 1;
     int32_t result;
     
     for ( int32_t attempt = 0
@@ -192,8 +211,8 @@ void V4L2CamData::FD_t::close_fd()
         {
             value = -1;
             
-            clog << "V4L2CamData::FD_t::close_fd: fd closed"
-                 << endl;
+            // clog << "V4L2CamData::FD_t::close_fd: fd closed (\"" << path << "\")"
+            //      << endl;
         }
         else if ( errno == EINTR )
         {
@@ -217,6 +236,89 @@ void V4L2CamData::FD_t::close_fd()
         
         value = -1;
     }
+}
+
+
+void V4L2CamData::FD_t::logSFSC() noexcept
+{
+    lock_guard<mutex> lck(sFSC_mtx);
+    
+    clog << "V4L2CamData::FD_t::logSFSC: [open FDs count] [file]";
+    
+    if ( sFSC.empty() )
+    {
+        clog << "\n  <no open and tracked FDs>"
+             << endl;
+        
+        return;
+    }
+    
+    for ( auto const& [path, cnt] : sFSC )
+        clog << "\n  " << to_string(cnt) << "  " << path;
+    
+    clog << endl;
+}
+
+bool V4L2CamData::FD_t::warnSFSC() noexcept
+{
+    lock_guard<mutex> lck(sFSC_mtx);
+    
+    if ( sFSC.empty() )
+        return false;
+    
+    clog << "V4L2CamData::FD_t::warnSFSC: there are files still open!!!"
+         << endl;
+    
+    return true;
+}
+
+void V4L2CamData::FD_t::incSFSCfor(FD_t const& fd) noexcept
+{
+    lock_guard<mutex> lck(sFSC_mtx);
+    
+    const string path = retrieve_fd_path(fd);
+    
+    // clog << "V4L2CamData::FD_t::incSFSCfor: " << path << " adopted"
+    //      << endl;
+    
+    ++sFSC[path];
+    
+    erase_if( sFSC
+            , [] (auto const& kv) { return kv.second == 0; }
+            );
+}
+
+void V4L2CamData::FD_t::decSFSCfor(FD_t const& fd) noexcept
+{
+    lock_guard<mutex> lck(sFSC_mtx);
+    
+    const string path = retrieve_fd_path(fd);
+    
+    // clog << "V4L2CamData::FD_t::decSFSCfor: " << path << " closing"
+    //      << endl;
+    
+    --sFSC[path];
+    
+    erase_if( sFSC
+            , [] (auto const& kv) { return kv.second == 0; }
+            );
+}
+
+
+unordered_map< string
+             , int32_t > V4L2CamData::FD_t::sFSC     = unordered_map< string
+                                                                    , int32_t
+                                                                    >{};
+mutex                    V4L2CamData::FD_t::sFSC_mtx = mutex{};
+
+
+V4L2CamData::V4L2CamData(string const& sNo) noexcept
+ :  serialNo(sNo)
+ ,  evntFD(make_shared<FD_t>(eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC)))
+{
+    if ( !evntFD ) [[unlikely]]
+        clog << "V4L2CamData::V4L2CamData: Failed to create eventfd!!!"
+             << endl;
 }
 
 
@@ -305,7 +407,7 @@ bool V4L2Cam::locateDeviceNodeAndInitialize()
          && state != State::DEVICE_KNOWN
        ) [[unlikely]]
     {
-        clog << "V4L2Cam::locateDeviceNdeAndInitialize: already initialized. "
+        clog << "V4L2Cam::locateDeviceNodeAndInitialize: already initialized. "
                 "no extrawurst!"
              << endl;
         
@@ -542,6 +644,21 @@ bool V4L2Cam::locateDeviceNodeAndInitialize()
             errorAction = ErrorAction::None;
             state       = State::INITIALIZED;
         }
+        else if (    errorAction != ErrorAction::CheckPermissions
+                  && errorAction != ErrorAction::ForgetDevice
+                ) [[unlikely]]
+        {
+            clog << "V4L2Cam::locateDeviceNodeAndInitialize: Model specific "
+                    "derived class object couldn't initialize properly.\n    "
+                    "At this stage probably bad device state. Unitializing. Marking "
+                    "for need to reset device."
+                 << endl;
+            
+            // uninitialize();
+            state = State::UNINITIALIZED;
+            
+            errorAction = ErrorAction::ResetDevice;
+        }
         
         break;
     }
@@ -576,6 +693,20 @@ bool V4L2Cam::locateDeviceNodeAndInitialize()
                     "product, serial No, and video capture device node "
                     "supporting streaming i/o, but could not fully initialize"
                  << endl;
+    }
+    
+    if ( errorAction == ErrorAction::CheckLogic ) [[unlikely]]
+    {
+        clog << "V4L2Cam::locateDeviceNodeAndInitialize: Communication with "
+                "device (driver) yielded errors indicating logical errors.\n    "
+                "At this stage probably bad device state. Unitializing. Marking "
+                "for need to reset device."
+             << endl;
+        
+        // uninitialize();
+        state = State::UNINITIALIZED;
+        
+        errorAction = ErrorAction::ResetDevice;
     }
     
     return state == State::INITIALIZED;
@@ -1123,7 +1254,12 @@ bool V4L2Cam::fillBuffer(v4l2_buffer& buf) noexcept
     shared_ptr<FD_t> fd_ptr = produceV4L2FD();
     
     if ( !fd_ptr || !*fd_ptr ) [[unlikely]]
+    {
+        clog << "V4L2Cam::fillBuffer: no v4l2 dev fd!!!"
+             << endl;
+        
         return false;
+    }
     
     
     if ( state != State::STREAMING ) [[unlikely]]
@@ -1142,12 +1278,12 @@ bool V4L2Cam::fillBuffer(v4l2_buffer& buf) noexcept
     
     pollfd fds[2]{};
     fds[0].fd     = *fd_ptr;
-    fds[0].events = ( POLLIN /*| POLLERR | POLLHUP | POLLNVAL*/ );
+    fds[0].events = ( POLLIN | POLLRDNORM /*| POLLERR | POLLHUP | POLLNVAL*/ );
     
     if ( evntFD ) [[  likely]]
     {
         fds[1].fd     = *evntFD;
-        fds[1].events = POLLIN;
+        fds[1].events = POLLIN | POLLRDNORM;
     }
     
     
@@ -1185,7 +1321,7 @@ bool V4L2Cam::fillBuffer(v4l2_buffer& buf) noexcept
         }
         
         if (    evntFD
-             && fds[1].revents & POLLIN
+             && fds[1].revents & ( POLLIN | POLLRDNORM )
            ) [[unlikely]]
         {
             uint64_t dummy;
@@ -1222,7 +1358,7 @@ bool V4L2Cam::fillBuffer(v4l2_buffer& buf) noexcept
             
             return false;
         }
-        else if ( !( fds[0].revents & POLLIN ) ) [[unlikely]]
+        else if ( !( fds[0].revents & ( POLLIN | POLLRDNORM ) ) ) [[unlikely]]
         {
             state = State::STREAMING;
             
@@ -1247,13 +1383,17 @@ bool V4L2Cam::fillBuffer(v4l2_buffer& buf) noexcept
         clog << "Will try anyways. Might work." // fucks up cam, but want to learn to rehabilitate
              << endl;
         
-        // TODO uncomment these:
-        // update(errorAction, ErrorAction::CheckLogic);
-             
-        // return false;
+        update(errorAction, ErrorAction::CheckLogic);
+        
+        return false;
     }
     
-    bool succ = xioctl(*fd_ptr, VIDIOC_DQBUF, "VIDIOC_DQBUF", &buf);
+    bool succ = xioctl( *fd_ptr
+                      , VIDIOC_DQBUF
+                      , "VIDIOC_DQBUF"
+                      , &buf
+                      , XIOCTL_FLAGS::QUASI_BLOCKING
+                      );
     errNo     = errno;
     
     state = State::STREAMING;
@@ -1349,7 +1489,7 @@ bool V4L2Cam::stopStreaming() noexcept
                 "v4l2_buffer structure for dequeueing whatever's left to dequeue!"
              << endl;
         
-        // let's not return, but still try to dequeue
+        return false;
     }
     
     
@@ -1369,12 +1509,13 @@ bool V4L2Cam::stopStreaming() noexcept
     clog << "V4L2Cam::stopStreaming: successfully set VIDIOC_STREAMOFF"
          << endl;
     
-    while ( xioctl( *fd_ptr
-                  , VIDIOC_DQBUF
-                  , "VIDIOC_DQBUF"
-                  , &buf
-                  , XIOCTL_FLAGS::EXPECT_EINVAL
-                  )
+    while (    buffersQueued.count() > 0
+            && xioctl( *fd_ptr
+                     , VIDIOC_DQBUF
+                     , "VIDIOC_DQBUF"
+                     , &buf
+                     , XIOCTL_FLAGS::EXPECT_EINVAL
+                     )
           )
     {
         if ( buf.index >= bufferCount ) [[unlikely]]
@@ -1387,6 +1528,9 @@ bool V4L2Cam::stopStreaming() noexcept
         prepBuffer(buf);
     }
     
+    // driver might have cleared queue with STREAMOFF, instead of playing the
+    // dequeue game with us.
+    buffersQueued.clear();
     
     state = State::BUFFER_QUEUE_PREPPED;
     
@@ -1548,6 +1692,9 @@ bool V4L2Cam::resetDevice() noexcept
         return false;
     }
     
+    clog << "V4L2Cam::resetDevice: see what we can do ..."
+         << endl;
+    
     storedUSBID.kernelName             = USBKernelName;
     storedUSBID.busNumber              = USBBusNumber;
     storedUSBID.deviceAddress          = USBDeviceAddress;
@@ -1671,6 +1818,8 @@ RESET_DEVICE_ESCALATE_MEASURES:
                  << endl;
             
             errorAction = ea;
+            
+            initializeSettings();
         }
         
         if ( !didReinit )
@@ -2552,17 +2701,17 @@ shared_ptr<V4L2Cam::FD_t> V4L2Cam::produceV4L2FD()
                                 );
 }
 
-bool V4L2Cam::openV4L2FD() {
-    if ( v4l2Path.empty() ) [[unlikely]]
-        return false;
-    if ( !v4l2FD || !*v4l2FD )
-        v4l2FD = make_shared<FD_t>(xopen( v4l2Path.c_str()
-                                        , O_RDWR | O_NONBLOCK
-                                        )
-                                  );
-    
-    return (bool)v4l2FD && (bool)*v4l2FD;
-}
+// bool V4L2Cam::openV4L2FD() {
+//     if ( v4l2Path.empty() ) [[unlikely]]
+//         return false;
+//     if ( !v4l2FD || !*v4l2FD )
+//         v4l2FD = make_shared<FD_t>(xopen( v4l2Path.c_str()
+//                                         , O_RDWR | O_NONBLOCK
+//                                         )
+//                                   );
+//     
+//     return (bool)v4l2FD && (bool)*v4l2FD;
+// }
 
 void V4L2Cam::closeV4L2FD()
 {
@@ -2647,9 +2796,18 @@ void V4L2Cam::uninitialize(bool hard) noexcept
           ? State::UNINITIALIZED
           : State::DEVICE_KNOWN;
     
-    bufferCount       = 0;
-    buffersQueued     = {};
-    bufferPlanes      = {};
+    bufferCount   = 0;
+    buffersQueued = {};
+    bufferPlanes  = {};
+    
+    // dev and dbg phase only. non-sensical, when there are multiple V4L2Cams
+    if ( FD_t::warnSFSC() ) [[unlikely]]
+    {
+        clog << "V4L2Cam::uninitialize: there are left open FDs! report follows:"
+             << endl;
+        
+        FD_t::logSFSC();
+    }
 }
 
 bool V4L2Cam::rebindUSBDevice() noexcept
@@ -2771,7 +2929,7 @@ bool V4L2Cam::rebindUSBDevice() noexcept
     {
         string   lastDriver;
         ofstream attr;
-
+        
         for ( auto const& i : ifaces )
         {
             if ( i.driver != lastDriver )
@@ -2789,7 +2947,7 @@ bool V4L2Cam::rebindUSBDevice() noexcept
                 
                 lastDriver = i.driver;
             }
-
+            
             attr << i.iface << '\n';
             clog << "V4L2Cam::rebindUSBDevice: Rebound " << i.iface
                  << " to " << i.driver
@@ -2817,7 +2975,7 @@ bool V4L2Cam::resetUSBDevice() noexcept
                  , std::stoul(storedUSBID.busNumber)
                  , std::stoul(storedUSBID.deviceAddress)
                  );
-
+    
     FD_t fd{xopen(path, O_RDWR)};
     
     if ( !fd ) [[unlikely]]
@@ -2827,7 +2985,7 @@ bool V4L2Cam::resetUSBDevice() noexcept
         
         return false;
     }
-
+    
     if ( ioctl(fd, USBDEVFS_RESET, 0) < 0 ) [[unlikely]]
     {
         clog << "V4L2Cam::resetUSBDevice: USBDEVFS_RESET failed"
@@ -2837,12 +2995,14 @@ bool V4L2Cam::resetUSBDevice() noexcept
     }
     
     // Give the link time to debounce and enumerate a bit.
-    this_thread::sleep_for(chrono::milliseconds(400));
-
+    this_thread::sleep_for(chrono::milliseconds(2500));
+    
     return true;
 }
 
 
+// TODO even at a hub at which you effectively cannot power cycle a single port
+//      this measure seems to have a resetting effect. Make use of that!
 bool V4L2Cam::powerCycleUSBDevice() noexcept
 {
     if ( storedUSBID.portDisablePathSelf.empty() ) [[unlikely]]
@@ -2869,7 +3029,8 @@ bool V4L2Cam::powerCycleUSBDevice() noexcept
     {
         auto const* path = usbPortDisableFiles[i]->c_str();
         
-        int  fd    = xopen(path, O_WRONLY | O_CLOEXEC);
+        FD_t fd{xopen(path, O_WRONLY | O_CLOEXEC)};
+        
         auto errNo = errno;
         
         if ( fd < 0 ) [[unlikely]]
@@ -2880,7 +3041,7 @@ bool V4L2Cam::powerCycleUSBDevice() noexcept
             
             break;
         }
-
+        
         char   const* val = "1\n";
         size_t const  len = strlen(val);
         
@@ -2890,12 +3051,8 @@ bool V4L2Cam::powerCycleUSBDevice() noexcept
                  << path << "\" failed: "
                  << strerror( errNo ) << '\n';
             
-            ::close( fd );
-            
             break;
         }
-
-        ::close( fd );
         
         ++turnedOffCount;
     }
@@ -2918,7 +3075,8 @@ bool V4L2Cam::powerCycleUSBDevice() noexcept
     {
         auto const* path = usbPortDisableFiles[i]->c_str();
         
-        int  fd    = xopen(usbPortDisableFiles[i]->c_str(), O_WRONLY | O_CLOEXEC);
+        FD_t fd{xopen(usbPortDisableFiles[i]->c_str(), O_WRONLY | O_CLOEXEC)};
+        
         auto errNo = errno;
         
         if ( fd < 0 ) [[unlikely]]
@@ -2929,7 +3087,7 @@ bool V4L2Cam::powerCycleUSBDevice() noexcept
             
             continue;
         }
-
+        
         char   const* val = "0\n";
         size_t const  len = strlen(val);
         
@@ -2939,12 +3097,8 @@ bool V4L2Cam::powerCycleUSBDevice() noexcept
                  << path << "\" failed: "
                  << strerror( errNo ) << '\n';
             
-            ::close( fd );
-            
             continue;
         }
-
-        ::close( fd );
         
         ++turnedOnCount;
     }
