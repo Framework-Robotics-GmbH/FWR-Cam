@@ -327,6 +327,18 @@ bool V4L2Cam::hubCanPowerCyclePerPort = false;
 
 bool V4L2Cam::goIntoInitializedState() noexcept
 {
+    if ( errorAction == ErrorAction::ForgetDevice ) [[unlikely]]
+    {
+        
+        
+        clog << "V4L2Cam::goIntoInitializedState: last known device state: "
+                "\"seems to be gone\". destruct this V4L2Cam object. make a new "
+                "one, if you feel like it."
+             << endl;
+        
+        return false;
+    }
+    
     if ( isJustInitialized() )
         return true;
     
@@ -467,11 +479,11 @@ bool V4L2Cam::locateDeviceNodeAndInitialize()
             continue;
         
         string_view svPath(path);
-        clog << "V4L2Cam::locateDeviceNodeAndInitialize: looking at"
-                "\n    path: " << svPath.substr(0, 70);
-        for ( size_t p{70}; p < svPath.size(); p += 70 )
-            clog << "\n          " << svPath.substr(p, 70);
-        clog << endl;
+        // clog << "V4L2Cam::locateDeviceNodeAndInitialize: looking at"
+        //         "\n    path: " << svPath.substr(0, 70);
+        // for ( size_t p{70}; p < svPath.size(); p += 70 )
+        //     clog << "\n          " << svPath.substr(p, 70);
+        // clog << endl;
         
         dev = udev_device_new_from_syspath(uDev, path);
         
@@ -494,9 +506,9 @@ bool V4L2Cam::locateDeviceNodeAndInitialize()
              || vendorID !=  vendor || productID !=  product
            )
         {
-            clog << "V4L2Cam::locateDeviceNodeAndInitialize: wrong vendor and/or "
-                    "product id"
-                 << endl;
+            // clog << "V4L2Cam::locateDeviceNodeAndInitialize: wrong vendor and/or "
+            //         "product id"
+            //      << endl;
             
             continue;
         }
@@ -507,25 +519,22 @@ bool V4L2Cam::locateDeviceNodeAndInitialize()
         
         if ( !sn || serialNo != sn )
         {
-            clog << "V4L2Cam::locateDeviceNodeAndInitialize: wrong serial No"
-                 << endl;
+            // clog << "V4L2Cam::locateDeviceNodeAndInitialize: wrong serial No"
+            //      << endl;
         
             continue;
         }
         
         serial_found = true;
-        errorAction  = ErrorAction::ResetDevice;
-        // ^--- clear, when we successfully initialized below. otherwise the
-        //      found device does need resetting
         
         char const* dev_path = udev_device_get_devnode(dev);
         
         if ( !dev_path )
             continue;
         
-        clog << "V4L2Cam::locateDeviceNodeAndInitialize: looking at"
-                "\n    device path: " << dev_path
-             << endl;
+        // clog << "V4L2Cam::locateDeviceNodeAndInitialize: looking at"
+        //         "\n    device path: " << dev_path
+        //      << endl;
         
         FD_t fd{xopen(dev_path, O_RDWR | O_NONBLOCK)};
         
@@ -541,7 +550,9 @@ bool V4L2Cam::locateDeviceNodeAndInitialize()
             
             clog << "V4L2Cam::locateDeviceNodeAndInitialize: Could not open "
                     "v4l2 device path! "
-                 << strerror(errNo) << endl;
+                    "\n  path: " << dev_path <<
+                    "\n  err : " << strerror(errNo)
+                 << endl;
             
             continue;
         }
@@ -555,8 +566,8 @@ bool V4L2Cam::locateDeviceNodeAndInitialize()
                 & V4L2_CAP_VIDEO_CAPTURE )
            )
         {
-            clog << "V4L2Cam::locateDeviceNodeAndInitialize: not a capture device"
-                 << endl;
+            // clog << "V4L2Cam::locateDeviceNodeAndInitialize: not a capture device"
+            //      << endl;
             
             continue;
         }
@@ -567,9 +578,9 @@ bool V4L2Cam::locateDeviceNodeAndInitialize()
                 & V4L2_CAP_STREAMING )
            )
         {
-            clog << "V4L2Cam::locateDeviceNodeAndInitialize: not a streaming "
-                    "capture device"
-                 << endl;
+            // clog << "V4L2Cam::locateDeviceNodeAndInitialize: not a streaming "
+            //         "capture device"
+            //      << endl;
             
             continue;
         }
@@ -612,7 +623,7 @@ bool V4L2Cam::locateDeviceNodeAndInitialize()
         auto product_name = udev_device_get_sysattr_value(pdev, "product");
         
         clog << "V4L2Cam::locateDeviceNodeAndInitialize: found ..."
-             << "\n    fd              : " << to_string((int32_t)*v4l2FD)
+             // << "\n    fd              : " << to_string((int32_t)*v4l2FD)
              << "\n    v4l2Path        : " << v4l2Path
              << "\n    USBKernelName   : " << USBKernelName
              << "\n    USBBusNumber    : " << USBBusNumber
@@ -627,10 +638,30 @@ bool V4L2Cam::locateDeviceNodeAndInitialize()
                                               )
              << endl;
         
+        auto const ea = errorAction;
+        errorAction   = ErrorAction::None;
+        
         if ( state == State::UNINITIALIZED )
         {
             determineSettingDomains(*v4l2FD);
-            determineMaxBufferSizeNeeded(*v4l2FD);
+            
+            if ( errorAction != ErrorAction::None ) [[unlikely]]
+            {
+                clog << "V4L2Cam::locateDeviceNodeAndInitialize: could not "
+                        "determine setting value domains!"
+                     << endl;
+                
+                break;
+            }
+            
+            if ( !determineMaxBufferSizeNeeded(*v4l2FD) ) [[unlikely]]
+            {
+                clog << "V4L2Cam::locateDeviceNodeAndInitialize: could not "
+                        "determine max buffer size needed!"
+                     << endl;
+                
+                break;
+            }
             
             initializeSettings();
             
@@ -641,8 +672,7 @@ bool V4L2Cam::locateDeviceNodeAndInitialize()
         
         if ( _locateDeviceNodeAndInitialize(uDev, pdev) )
         {
-            errorAction = ErrorAction::None;
-            state       = State::INITIALIZED;
+            state = State::INITIALIZED;
         }
         else if (    errorAction != ErrorAction::CheckPermissions
                   && errorAction != ErrorAction::ForgetDevice
@@ -650,7 +680,7 @@ bool V4L2Cam::locateDeviceNodeAndInitialize()
         {
             clog << "V4L2Cam::locateDeviceNodeAndInitialize: Model specific "
                     "derived class object couldn't initialize properly.\n    "
-                    "At this stage probably bad device state. Unitializing. Marking "
+                    "At this stage probably bad device state. Marking "
                     "for need to reset device."
                  << endl;
             
@@ -658,7 +688,11 @@ bool V4L2Cam::locateDeviceNodeAndInitialize()
             state = State::UNINITIALIZED;
             
             errorAction = ErrorAction::ResetDevice;
+            
+            break;
         }
+        
+        update(errorAction, ea);
         
         break;
     }
@@ -707,6 +741,15 @@ bool V4L2Cam::locateDeviceNodeAndInitialize()
         state = State::UNINITIALIZED;
         
         errorAction = ErrorAction::ResetDevice;
+    }
+    
+    if ( errorAction == ErrorAction::ForgetDevice ) [[unlikely]]
+    {
+        clog << "V4L2Cam::locateDeviceNodeAndInitialize: Device seems to be gone!"
+             << endl;
+        
+        uninitialize();
+        state = State::UNINITIALIZED;
     }
     
     return state == State::INITIALIZED;
@@ -1366,7 +1409,7 @@ bool V4L2Cam::fillBuffer(v4l2_buffer& buf) noexcept
         }
         
         // we've got a frame, so the last reset measure - if any taken at all -
-        // seems to have been fruitful
+        // seems to have been fruitful -> reset for handling of the next error
         lastResetMeasure = ResetMeasure::NONE;
         
         break;
@@ -1436,8 +1479,7 @@ bool V4L2Cam::wake() noexcept
          && state != State::DEQUEUEING
        ) [[unlikely]]
     {
-        clog << "V4L2Cam::wake: not in the correct state "
-                "(STREAMING|DEQUEUEING) to find a thread to wake in fillBuffer()"
+        clog << "V4L2Cam::wake: not in working state; no thread to wake"
              << endl;
         
         return false;
@@ -1506,8 +1548,8 @@ bool V4L2Cam::stopStreaming() noexcept
         return false;
     }
     
-    clog << "V4L2Cam::stopStreaming: successfully set VIDIOC_STREAMOFF"
-         << endl;
+    // clog << "V4L2Cam::stopStreaming: successfully set VIDIOC_STREAMOFF"
+    //      << endl;
     
     while (    buffersQueued.count() > 0
             && xioctl( *fd_ptr
@@ -1702,9 +1744,10 @@ bool V4L2Cam::resetDevice() noexcept
     storedUSBID.portDisablePathPeer = USBPortDisablePathPeer;
     
     tryAndStopStreaming();
-    uninitialize(true);
     
 RESET_DEVICE_ESCALATE_MEASURES:
+    
+    uninitialize(true);
     
     bool didReset{false}, didReinit{false};
     chrono::milliseconds reinitInterval{};
@@ -1712,15 +1755,16 @@ RESET_DEVICE_ESCALATE_MEASURES:
     
     // lastResetMeasure gets reset on successfull frame fetch
     
+    // can't seem to get it to work for now
     if (     lastResetMeasure == ResetMeasure::NONE )
     {
         clog << "V4L2Cam::resetDevice: trying to rebind USB interfaces ..."
              << endl;
         
         lastResetMeasure = ResetMeasure::USB_IFACE_REBIND;
-        reinitInterval   = chrono::milliseconds{ 200};
+        reinitInterval   = chrono::milliseconds{ 500};
         reinitTimeout    = chrono::milliseconds{2000};
-        didReset         = rebindUSBDevice();
+        // didReset         = rebindUSBDevice();
     }
     if (    !didReset
          &&  lastResetMeasure == ResetMeasure::USB_IFACE_REBIND
@@ -1730,7 +1774,7 @@ RESET_DEVICE_ESCALATE_MEASURES:
              << endl;
         
         lastResetMeasure = ResetMeasure::USB_DEVFS_RESET;
-        reinitInterval   = chrono::milliseconds{ 400};
+        reinitInterval   = chrono::milliseconds{1250};
         reinitTimeout    = chrono::milliseconds{5000};
         didReset         = resetUSBDevice();
     }
@@ -1757,7 +1801,7 @@ RESET_DEVICE_ESCALATE_MEASURES:
                  << endl;
             
             lastResetMeasure = ResetMeasure::USB_PORT_POWER_CYCLE;
-            reinitInterval   = chrono::milliseconds{ 500};
+            reinitInterval   = chrono::milliseconds{2000};
             reinitTimeout    = chrono::milliseconds{8000};
             // TODO *untested*
             didReset         = powerCycleUSBDevice();
@@ -1794,7 +1838,6 @@ RESET_DEVICE_ESCALATE_MEASURES:
         clog << "V4L2Cam::resetDevice: trying to re-init ..."
              << endl;
         
-        auto const ea       = errorAction;
         auto const deadline = chrono::steady_clock::now() + reinitTimeout;
         
         do
@@ -1807,20 +1850,6 @@ RESET_DEVICE_ESCALATE_MEASURES:
         while (    !didReinit
                 &&  chrono::steady_clock::now() < deadline
               );
-        
-        // just in case one of the settings in reapplySettings
-        // didn't work out - seen such a thing
-        if ( errorAction != ea )
-        {
-            clog << "V4L2Cam::resetDevice: ... successfully, but some settings "
-                    "re-application seems to have gone wrong. still considering "
-                    "the operation a success."
-                 << endl;
-            
-            errorAction = ea;
-            
-            initializeSettings();
-        }
         
         if ( !didReinit )
         {
@@ -1892,9 +1921,6 @@ V4L2Cam::~V4L2Cam() noexcept
     uninitialize();
     
     evntFD->close_fd();
-    
-    clog << "V4L2Cam::~V4L2Cam: evntFD closed"
-         << endl;
 }
 
 
@@ -2297,6 +2323,14 @@ void V4L2Cam::initializeSettings()
 
 void V4L2Cam::reapplySettings()
 {
+    auto const ea = errorAction;
+    
+    clog << "V4L2Cam::reapplySettings: !!! unintelligently trying to re-apply "
+            "remembered settings\n"
+            "                              some might yield \"Permission "
+            "denied\" errors. Can safely be ignored."
+         << endl;
+    
     if (         resolutionSource == ssrc::DEVICE
          ||     pixelFormatSource == ssrc::DEVICE ) applyResolutionAndPixelFormat();
     if (         brightnessSource == ssrc::DEVICE ) applyBrightness();
@@ -2308,6 +2342,18 @@ void V4L2Cam::reapplySettings()
     if (               gainSource == ssrc::DEVICE ) applyGain();
     if ( powerLineFrequencySource == ssrc::DEVICE ) applyPowerLineFrequency();
     if (           exposureSource == ssrc::DEVICE ) applyExposure();
+    
+    if (    errorAction != ea
+         && errorAction == ErrorAction::CheckPermissions
+       )
+    {
+        errorAction = ea;
+        
+        initializeSettings();
+    }
+    
+    clog << "V4L2Cam::reapplySettings: done"
+         << endl;
 }
 
 // // only to be used by locateDeviceNodeAndInitialize()
@@ -2738,8 +2784,16 @@ bool V4L2Cam::tryAndStopStreaming(bool hard) noexcept
           ) [[unlikely]]
     {
         wake();
-        this_thread::yield();
+        this_thread::sleep_for(chrono::milliseconds(100));
         stopStreaming();
+        
+        if ( errorAction == ErrorAction::ForgetDevice ) [[unlikely]]
+        {
+            clog << "V4L2Cam::tryAndStopStreaming: device seems to be gone!"
+                 << endl;
+            
+            return false;
+        }
         
         if ( tries++ >= maxTries ) [[unlikely]]
         {
@@ -2770,6 +2824,7 @@ void V4L2Cam::uninitialize(bool hard) noexcept
     if (     state != State::UNINITIALIZED
          &&  state != State::DEVICE_KNOWN
          &&  state != State::INITIALIZED
+         &&  errorAction != ErrorAction::ForgetDevice
          && !hard
        ) [[unlikely]]
     {
@@ -2800,14 +2855,14 @@ void V4L2Cam::uninitialize(bool hard) noexcept
     buffersQueued = {};
     bufferPlanes  = {};
     
-    // dev and dbg phase only. non-sensical, when there are multiple V4L2Cams
-    if ( FD_t::warnSFSC() ) [[unlikely]]
-    {
-        clog << "V4L2Cam::uninitialize: there are left open FDs! report follows:"
-             << endl;
-        
-        FD_t::logSFSC();
-    }
+//     // dev and dbg phase only. non-sensical, when there are multiple V4L2Cams
+//     if ( FD_t::warnSFSC() ) [[unlikely]]
+//     {
+//         clog << "V4L2Cam::uninitialize: there are left open FDs! report follows:"
+//              << endl;
+//         
+//         FD_t::logSFSC();
+//     }
 }
 
 bool V4L2Cam::rebindUSBDevice() noexcept
@@ -2870,7 +2925,7 @@ bool V4L2Cam::rebindUSBDevice() noexcept
         return false;
     }
     
-    auto openAttr = [] ( char const* driver, char const* attr ) -> ofstream
+    auto openAttr = [] (char const* driver, char const* attr) -> ofstream
     {
         string p = string("/sys/bus/usb/drivers/") + driver + "/" + attr;
         ofstream f(p);
@@ -2883,7 +2938,7 @@ bool V4L2Cam::rebindUSBDevice() noexcept
     // Unbind: uvcvideo first (keeps ordering tidy), then others.
     stable_sort( ifaces.begin()
                , ifaces.end()
-               , [] ( Iface const& a, Iface const& b )
+               , [] (Iface const& a, Iface const& b)
                  {
                      bool au = (a.driver == "uvcvideo");
                      bool bu = (b.driver == "uvcvideo");
@@ -2916,6 +2971,7 @@ bool V4L2Cam::rebindUSBDevice() noexcept
             }
             
             attr << i.iface << '\n';
+            attr.close();
             clog << "V4L2Cam::rebindUSBDevice: Unbound " << i.iface
                  << " from " << i.driver
                  << endl;
@@ -2924,7 +2980,7 @@ bool V4L2Cam::rebindUSBDevice() noexcept
         }
     }
     
-    this_thread::sleep_for(chrono::seconds(1)); // TODO a second? Really?
+    this_thread::sleep_for(chrono::milliseconds(150));
     
     {
         string   lastDriver;
@@ -2949,8 +3005,9 @@ bool V4L2Cam::rebindUSBDevice() noexcept
             }
             
             attr << i.iface << '\n';
+            attr.close();
             clog << "V4L2Cam::rebindUSBDevice: Rebound " << i.iface
-                 << " to " << i.driver
+                 << " to   " << i.driver
                  << endl;
             
             ++reboundCount;
@@ -2958,7 +3015,7 @@ bool V4L2Cam::rebindUSBDevice() noexcept
     }
     
     if ( reboundCount > 0 )
-        this_thread::sleep_for(chrono::milliseconds(150));
+        this_thread::sleep_for(chrono::milliseconds(1500));
     
     return    unboundCount >  0
            && reboundCount == unboundCount;
@@ -2995,7 +3052,7 @@ bool V4L2Cam::resetUSBDevice() noexcept
     }
     
     // Give the link time to debounce and enumerate a bit.
-    this_thread::sleep_for(chrono::milliseconds(2000));
+    this_thread::sleep_for(chrono::milliseconds(5000));
     
     return true;
 }
@@ -3129,7 +3186,7 @@ bool V4L2Cam::powerCycleUSBDevice() noexcept
                   && turnedOnCount   > 0;
     
     if ( cycled )
-        this_thread::sleep_for(chrono::milliseconds(2000));
+        this_thread::sleep_for(chrono::milliseconds(5000));
     
     return cycled;
 }
