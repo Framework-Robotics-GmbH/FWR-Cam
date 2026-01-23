@@ -651,6 +651,9 @@ bool V4L2Cam::locateDeviceNodeAndInitialize()
                         "determine setting value domains!"
                      << endl;
                 
+                if ( errorAction == ErrorAction::Reinitialize )
+                    errorAction = ErrorAction::ResetDevice;
+                
                 break;
             }
             
@@ -659,6 +662,9 @@ bool V4L2Cam::locateDeviceNodeAndInitialize()
                 clog << "V4L2Cam::locateDeviceNodeAndInitialize: could not "
                         "determine max buffer size needed!"
                      << endl;
+                
+                if ( errorAction == ErrorAction::Reinitialize )
+                    errorAction = ErrorAction::ResetDevice;
                 
                 break;
             }
