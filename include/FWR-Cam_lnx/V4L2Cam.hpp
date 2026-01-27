@@ -290,7 +290,7 @@ struct V4L2CamData
     
     
     //                 //
-    // settings valeus //
+    // settings values //
     //                 //
     
     std::optional<uint32_t>     maxBufferSizeNeeded{};
@@ -319,6 +319,9 @@ struct V4L2CamData
     SettingSource                     gammaSource{};
     std::optional<int32_t>            gamma{};
     
+    SettingSource                     whiteBalanceAutoSource{};
+    std::optional<bool>               whiteBalanceAuto{};
+    
     SettingSource                     whiteBalanceSource{};
     std::optional<int32_t>            whiteBalance{};
     
@@ -327,6 +330,9 @@ struct V4L2CamData
     
     SettingSource                     powerLineFrequencySource{};
     std::optional<PowerLineFrequency> powerLineFrequency{};
+    
+    SettingSource                     exposureAutoSource{};
+    std::optional<bool>               exposureAuto{};
     
     SettingSource                     exposureSource{};
     std::optional<int32_t>            exposure{};
@@ -581,6 +587,12 @@ public:
     bool fetchGamma();
     bool applyGamma();
     
+    ssrc  tellWhiteBalanceAutoSource() { return whiteBalanceAutoSource; }
+    bool  giveWhiteBalanceAuto(bool &     whiteBalanceAuto);
+    bool  takeWhiteBalanceAuto(bool const whiteBalanceAuto);
+    bool fetchWhiteBalanceAuto();
+    bool applyWhiteBalanceAuto();
+    
     ssrc  tellWhiteBalanceSource() { return whiteBalanceSource; }
     bool  giveWhiteBalance(int32_t &     whiteBalance);
     bool  takeWhiteBalance(int32_t const whiteBalance);
@@ -598,6 +610,12 @@ public:
     bool  takePowerLineFrequency(uint8_t const powerLineFrequency);
     bool fetchPowerLineFrequency();
     bool applyPowerLineFrequency();
+    
+    ssrc  tellExposureAutoSource() { return exposureAutoSource; }
+    bool  giveExposureAuto(bool &     exposureAuto);
+    bool  takeExposureAuto(bool const exposureAuto);
+    bool fetchExposureAuto();
+    bool applyExposureAuto();
     
     ssrc  tellExposureSource() { return exposureSource; }
     bool  giveExposure(int32_t &     exposure);

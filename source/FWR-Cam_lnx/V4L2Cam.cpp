@@ -3729,7 +3729,7 @@ bool V4L2Cam::fetchResolutionAndPixelFormat()
                 format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
     
     if ( xioctl( *fd_ptr
-               , VIDIOC_G_FMT
+               ,  VIDIOC_G_FMT
                , "VIDIOC_G_FMT"
                , &format
                , XIOCTL_FLAGS::EXPECT_EINVAL
@@ -3741,7 +3741,12 @@ bool V4L2Cam::fetchResolutionAndPixelFormat()
         format = {};
         format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         
-        if ( xioctl(*fd_ptr, VIDIOC_G_FMT, "VIDIOC_G_FMT", &format) )
+        if ( xioctl( *fd_ptr
+                   ,  VIDIOC_G_FMT
+                   , "VIDIOC_G_FMT"
+                   , &format
+                   )
+           )
             updateResNPixFmtFromDeviceInfo(format);
         else
             resetResNPixFmt();
@@ -3769,7 +3774,7 @@ bool V4L2Cam::applyResolutionAndPixelFormat()
     format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
     
     if ( xioctl( *fd_ptr
-               , VIDIOC_G_FMT
+               ,  VIDIOC_G_FMT
                , "VIDIOC_G_FMT"
                , &format
                , XIOCTL_FLAGS::EXPECT_EINVAL
@@ -3795,7 +3800,12 @@ bool V4L2Cam::applyResolutionAndPixelFormat()
         
         format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         
-        if ( xioctl(*fd_ptr, VIDIOC_G_FMT, "VIDIOC_G_FMT", &format) )
+        if ( xioctl( *fd_ptr
+                   ,  VIDIOC_G_FMT
+                   , "VIDIOC_G_FMT"
+                   , &format
+                   )
+           )
         {
             apiToUse = APIToUse::SINGLE;
             
@@ -3819,7 +3829,12 @@ bool V4L2Cam::applyResolutionAndPixelFormat()
     }
     
     
-    if ( xioctl(*fd_ptr, VIDIOC_S_FMT, "VIDIOC_S_FMT", &format) ) [[  likely]]
+    if ( xioctl( *fd_ptr
+               ,  VIDIOC_S_FMT
+               , "VIDIOC_S_FMT"
+               , &format
+               )
+       ) [[  likely]]
         updateResNPixFmtFromDeviceInfo(format);
     else
         resetResNPixFmt();
@@ -3996,7 +4011,7 @@ bool V4L2Cam::fetchBrightness()
     int32_t value{};
     
     bool fetched = fetch_control_value( produceV4L2FD()
-                                      , V4L2_CID_BRIGHTNESS
+                                      ,  V4L2_CID_BRIGHTNESS
                                       , "V4L2_CID_BRIGHTNESS"
                                       , value
                                       );
@@ -4027,7 +4042,7 @@ bool V4L2Cam::applyBrightness()
         value -= (value - BRIGHTNESS_MIN) % BRIGHTNESS_STEP;
     
     bool applied = apply_control_value( produceV4L2FD()
-                                      , V4L2_CID_BRIGHTNESS
+                                      ,  V4L2_CID_BRIGHTNESS
                                       , "V4L2_CID_BRIGHTNESS"
                                       , value
                                       );
@@ -4091,7 +4106,7 @@ bool V4L2Cam::fetchContrast()
     int32_t value{};
 
     bool fetched = fetch_control_value( produceV4L2FD()
-                                      , V4L2_CID_CONTRAST
+                                      ,  V4L2_CID_CONTRAST
                                       , "V4L2_CID_CONTRAST"
                                       , value
                                       );
@@ -4122,7 +4137,7 @@ bool V4L2Cam::applyContrast()
         value -= (value - CONTRAST_MIN) % CONTRAST_STEP;
     
     bool applied = apply_control_value( produceV4L2FD()
-                                      , V4L2_CID_CONTRAST
+                                      ,  V4L2_CID_CONTRAST
                                       , "V4L2_CID_CONTRAST"
                                       , value
                                       );
@@ -4186,7 +4201,7 @@ bool V4L2Cam::fetchSaturation()
     int32_t value{};
 
     bool fetched = fetch_control_value( produceV4L2FD()
-                                      , V4L2_CID_SATURATION
+                                      ,  V4L2_CID_SATURATION
                                       , "V4L2_CID_SATURATION"
                                       , value
                                       );
@@ -4217,7 +4232,7 @@ bool V4L2Cam::applySaturation()
         value -= (value - SATURATION_MIN) % SATURATION_STEP;
     
     bool applied = apply_control_value( produceV4L2FD()
-                                      , V4L2_CID_SATURATION
+                                      ,  V4L2_CID_SATURATION
                                       , "V4L2_CID_SATURATION"
                                       , value
                                       );
@@ -4281,7 +4296,7 @@ bool V4L2Cam::fetchSharpness()
     int32_t value{};
 
     bool fetched = fetch_control_value( produceV4L2FD()
-                                      , V4L2_CID_SHARPNESS
+                                      ,  V4L2_CID_SHARPNESS
                                       , "V4L2_CID_SHARPNESS"
                                       , value
                                       );
@@ -4312,7 +4327,7 @@ bool V4L2Cam::applySharpness()
         value -= (value - SHARPNESS_MIN) % SHARPNESS_STEP;
     
     bool applied = apply_control_value( produceV4L2FD()
-                                      , V4L2_CID_SHARPNESS
+                                      ,  V4L2_CID_SHARPNESS
                                       , "V4L2_CID_SHARPNESS"
                                       , value
                                       );
@@ -4376,7 +4391,7 @@ bool V4L2Cam::fetchGamma()
     int32_t value{};
 
     bool fetched = fetch_control_value( produceV4L2FD()
-                                      , V4L2_CID_GAMMA
+                                      ,  V4L2_CID_GAMMA
                                       , "V4L2_CID_GAMMA"
                                       , value
                                       );
@@ -4407,7 +4422,7 @@ bool V4L2Cam::applyGamma()
         value -= (value - GAMMA_MIN) % GAMMA_STEP;
     
     bool applied = apply_control_value( produceV4L2FD()
-                                      , V4L2_CID_GAMMA
+                                      ,  V4L2_CID_GAMMA
                                       , "V4L2_CID_GAMMA"
                                       , value
                                       );
@@ -4424,6 +4439,87 @@ bool V4L2Cam::applyGamma()
     }
     else
         return fetchGamma();
+}
+
+
+/* ****************** */
+/* White Balance Auto */
+/* ****************** */
+
+bool V4L2Cam::giveWhiteBalanceAuto(bool& _whiteBalanceAuto)
+{
+    if ( !whiteBalanceAuto.has_value() ) [[unlikely]]
+        return false;
+    
+    _whiteBalanceAuto = whiteBalanceAuto.value();
+    
+    return true;
+}
+
+bool V4L2Cam::takeWhiteBalanceAuto(bool const _whiteBalanceAuto)
+{
+    whiteBalanceAuto       = _whiteBalanceAuto;
+    whiteBalanceAutoSource = ssrc::USER;
+    
+    return true;
+}
+
+bool V4L2Cam::fetchWhiteBalanceAuto()
+{
+    int32_t value{};
+
+    bool fetched = fetch_control_value( produceV4L2FD()
+                                      ,  V4L2_CID_AUTO_WHITE_BALANCE
+                                      , "V4L2_CID_AUTO_WHITE_BALANCE"
+                                      , value
+                                      );
+    
+    if (    fetched
+         && (    value == 0
+              || value == 1 ) ) { whiteBalanceAuto       = value == 1
+                                                         ? true
+                                                         : false;
+                                  whiteBalanceAutoSource = ssrc::DEVICE;
+                                }
+    else                        { whiteBalanceAuto.reset();
+                                  whiteBalanceAutoSource = ssrc::NONE;
+                                }
+    
+    if ( fetched && ( value < 0 || value > 1 ) ) [[unlikely]]
+        clog << "V4L2Cam::fetchWhiteBalanceAuto: value reported by device not "
+                "valid according to our domain knowledge!"
+             << endl;
+    
+    return whiteBalanceAutoSource == ssrc::DEVICE;
+}
+
+bool V4L2Cam::applyWhiteBalanceAuto()
+{
+    if ( whiteBalanceAutoSource == ssrc::NONE || !whiteBalanceAuto.has_value() )
+        return false;
+    
+    int32_t value = whiteBalanceAuto.value() == true
+                  ? 1
+                  : 0;
+    
+    bool applied = apply_control_value( produceV4L2FD()
+                                      ,  V4L2_CID_AUTO_WHITE_BALANCE
+                                      , "V4L2_CID_AUTO_WHITE_BALANCE"
+                                      , value
+                                      );
+    
+    if ( !applied ) [[unlikely]]
+    {
+        whiteBalanceAuto.reset();
+        whiteBalanceAutoSource = ssrc::NONE;
+        
+        clog << "V4L2Cam::applyWhiteBalanceAuto: ioctl failed!"
+             << endl;
+        
+        return false;
+    }
+    else
+        return fetchWhiteBalanceAuto();
 }
 
 
@@ -4471,7 +4567,7 @@ bool V4L2Cam::fetchWhiteBalance()
     int32_t value{};
 
     bool fetched = fetch_control_value( produceV4L2FD()
-                                      , V4L2_CID_WHITE_BALANCE_TEMPERATURE
+                                      ,  V4L2_CID_WHITE_BALANCE_TEMPERATURE
                                       , "V4L2_CID_WHITE_BALANCE_TEMPERATURE"
                                       , value
                                       );
@@ -4502,7 +4598,7 @@ bool V4L2Cam::applyWhiteBalance()
         value -= (value - WHITE_BALANCE_MIN) % WHITE_BALANCE_STEP;
     
     bool applied = apply_control_value( produceV4L2FD()
-                                      , V4L2_CID_WHITE_BALANCE_TEMPERATURE
+                                      ,  V4L2_CID_WHITE_BALANCE_TEMPERATURE
                                       , "V4L2_CID_WHITE_BALANCE_TEMPERATURE"
                                       , value
                                       );
@@ -4566,7 +4662,7 @@ bool V4L2Cam::fetchGain()
     int32_t value{};
 
     bool fetched = fetch_control_value( produceV4L2FD()
-                                      , V4L2_CID_GAIN
+                                      ,  V4L2_CID_GAIN
                                       , "V4L2_CID_GAIN"
                                       , value
                                       );
@@ -4597,7 +4693,7 @@ bool V4L2Cam::applyGain()
         value -= (value - GAIN_MIN) % GAIN_STEP;
     
     bool applied = apply_control_value( produceV4L2FD()
-                                      , V4L2_CID_GAIN
+                                      ,  V4L2_CID_GAIN
                                       , "V4L2_CID_GAIN"
                                       , value
                                       );
@@ -4651,7 +4747,7 @@ bool V4L2Cam::fetchPowerLineFrequency()
     int32_t value{};
     
     bool fetched = fetch_control_value( produceV4L2FD()
-                                      , V4L2_CID_POWER_LINE_FREQUENCY
+                                      ,  V4L2_CID_POWER_LINE_FREQUENCY
                                       , "V4L2_CID_POWER_LINE_FREQUENCY"
                                       , value
                                       );
@@ -4678,7 +4774,7 @@ bool V4L2Cam::applyPowerLineFrequency()
         return false;
     
     bool applied = apply_control_value( produceV4L2FD()
-                                      , V4L2_CID_POWER_LINE_FREQUENCY
+                                      ,  V4L2_CID_POWER_LINE_FREQUENCY
                                       , "V4L2_CID_POWER_LINE_FREQUENCY"
                                       , enum_integer(powerLineFrequency.value())
                                       );
@@ -4695,6 +4791,87 @@ bool V4L2Cam::applyPowerLineFrequency()
     }
     else
         return fetchPowerLineFrequency();
+}
+
+
+/* ************* */
+/* Exposure Auto */
+/* ************* */
+
+bool V4L2Cam::giveExposureAuto(bool& _exposureAuto)
+{
+    if ( !exposureAuto.has_value() ) [[unlikely]]
+        return false;
+    
+    _exposureAuto = exposureAuto.value();
+    
+    return true;
+}
+
+bool V4L2Cam::takeExposureAuto(bool const _exposureAuto)
+{
+    exposureAuto       = _exposureAuto;
+    exposureAutoSource = ssrc::USER;
+    
+    return true;
+}
+
+bool V4L2Cam::fetchExposureAuto()
+{
+    int32_t value{};
+
+    bool fetched = fetch_control_value( produceV4L2FD()
+                                      ,  V4L2_CID_EXPOSURE_ABSOLUTE
+                                      , "V4L2_CID_EXPOSURE_ABSOLUTE"
+                                      , value
+                                      );
+    
+    if (    fetched
+         && (    value == 0
+              || value == 1 ) ) { exposureAuto       = value == 0
+                                                     ? true
+                                                     : false;
+                                  exposureAutoSource = ssrc::DEVICE;
+                                }
+    else                        { exposureAuto.reset();
+                                  exposureAutoSource = ssrc::NONE;
+                                }
+    
+    if ( fetched && ( value < 0 || value > 1 ) ) [[unlikely]]
+        clog << "V4L2Cam::fetchExposureAuto: value reported by device not valid "
+                "according to our domain knowledge!"
+             << endl;
+    
+    return exposureAutoSource == ssrc::DEVICE;
+}
+
+bool V4L2Cam::applyExposureAuto()
+{
+    if ( exposureAutoSource == ssrc::NONE || !exposureAuto.has_value() )
+        return false;
+    
+    int32_t value = exposureAuto.value() == true
+                  ? 0
+                  : 1;
+    
+    bool applied = apply_control_value( produceV4L2FD()
+                                      ,  V4L2_CID_EXPOSURE_ABSOLUTE
+                                      , "V4L2_CID_EXPOSURE_ABSOLUTE"
+                                      , value
+                                      );
+    
+    if ( !applied ) [[unlikely]]
+    {
+        exposureAuto.reset();
+        exposureAutoSource = ssrc::NONE;
+        
+        clog << "V4L2Cam::applyExposureAuto: ioctl failed!"
+             << endl;
+        
+        return false;
+    }
+    else
+        return fetchExposureAuto();
 }
 
 
@@ -4742,7 +4919,7 @@ bool V4L2Cam::fetchExposure()
     int32_t value{};
 
     bool fetched = fetch_control_value( produceV4L2FD()
-                                      , V4L2_CID_EXPOSURE_ABSOLUTE
+                                      ,  V4L2_CID_EXPOSURE_ABSOLUTE
                                       , "V4L2_CID_EXPOSURE_ABSOLUTE"
                                       , value
                                       );
@@ -4773,7 +4950,7 @@ bool V4L2Cam::applyExposure()
         value -= (value - EXPOSURE_MIN) % EXPOSURE_STEP;
     
     bool applied = apply_control_value( produceV4L2FD()
-                                      , V4L2_CID_EXPOSURE_ABSOLUTE
+                                      ,  V4L2_CID_EXPOSURE_ABSOLUTE
                                       , "V4L2_CID_EXPOSURE_ABSOLUTE"
                                       , value
                                       );
