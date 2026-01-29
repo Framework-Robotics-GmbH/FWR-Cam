@@ -717,7 +717,7 @@ bool See3CAM_24CUG::_checkPixelFormat(PixelFormat const _pixelFormat)
     return       static_cast< pfInt>(_pixelFormat)
               == static_cast<spfInt>(SupportedPixelFormat::UYVY)
            ||    static_cast< pfInt>(_pixelFormat)
-              == static_cast<spfInt>(SupportedPixelFormat::UYVY);
+              == static_cast<spfInt>(SupportedPixelFormat::MJPEG);
 }
 
 

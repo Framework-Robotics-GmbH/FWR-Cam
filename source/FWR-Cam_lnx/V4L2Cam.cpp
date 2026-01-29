@@ -90,6 +90,7 @@ std::string_view to_string_view(PixelFormat pf) noexcept
         case PixelFormat::YUYV   : return "YUYV"   ;
         case PixelFormat::UYVY   : return "UYVY"   ;
         case PixelFormat::MJPEG  : return "MJPEG"  ;
+        case PixelFormat::JPEG   : return "JPEG"   ;
         case PixelFormat::H264   : return "H264"   ;
         case PixelFormat::NV12   : return "NV12"   ;
         case PixelFormat::NV21   : return "NV21"   ;
@@ -116,6 +117,7 @@ uint32_t to_integer(PixelFormat pf) noexcept
         case PixelFormat::YUYV   : [[fallthrough]];
         case PixelFormat::UYVY   : [[fallthrough]];
         case PixelFormat::MJPEG  : [[fallthrough]];
+        case PixelFormat::JPEG   : [[fallthrough]];
         case PixelFormat::H264   : [[fallthrough]];
         case PixelFormat::NV12   : [[fallthrough]];
         case PixelFormat::NV21   : [[fallthrough]];
@@ -142,6 +144,7 @@ PixelFormat to_PixelFormat(uint32_t ui) noexcept
         case PixelFormat::YUYV   : [[fallthrough]];
         case PixelFormat::UYVY   : [[fallthrough]];
         case PixelFormat::MJPEG  : [[fallthrough]];
+        case PixelFormat::JPEG   : [[fallthrough]];
         case PixelFormat::H264   : [[fallthrough]];
         case PixelFormat::NV12   : [[fallthrough]];
         case PixelFormat::NV21   : [[fallthrough]];
@@ -4821,8 +4824,8 @@ bool V4L2Cam::fetchExposureAuto()
     int32_t value{};
 
     bool fetched = fetch_control_value( produceV4L2FD()
-                                      ,  V4L2_CID_EXPOSURE_ABSOLUTE
-                                      , "V4L2_CID_EXPOSURE_ABSOLUTE"
+                                      ,  V4L2_CID_EXPOSURE_AUTO
+                                      , "V4L2_CID_EXPOSURE_AUTO"
                                       , value
                                       );
     
@@ -4855,8 +4858,8 @@ bool V4L2Cam::applyExposureAuto()
                   : 1;
     
     bool applied = apply_control_value( produceV4L2FD()
-                                      ,  V4L2_CID_EXPOSURE_ABSOLUTE
-                                      , "V4L2_CID_EXPOSURE_ABSOLUTE"
+                                      ,  V4L2_CID_EXPOSURE_AUTO
+                                      , "V4L2_CID_EXPOSURE_AUTO"
                                       , value
                                       );
     
