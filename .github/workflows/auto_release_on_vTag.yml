@@ -31,6 +31,35 @@ jobs:
               libudev-dev
           elif [ "${{ matrix.arch }}" = "rpi-aarch64" ]; then
             sudo dpkg --add-architecture arm64
+
+            # Force the runner's default Ubuntu sources to amd64 only (deb822 format on 24.04 runners)
+            if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+              sudo awk '
+                BEGIN { in=0 }
+                /^Types:/ { in=1 }
+                in && /^Architectures:/ { hasArch=1 }
+                in && /^$/ {
+                  if ( !hasArch ) print "Architectures: amd64"
+                  in=0; hasArch=0
+                }
+                { print }
+                END {
+                  if ( in && !hasArch ) print "Architectures: amd64"
+                }
+              ' /etc/apt/sources.list.d/ubuntu.sources | sudo tee /etc/apt/sources.list.d/ubuntu.sources.new > /dev/null
+              sudo mv /etc/apt/sources.list.d/ubuntu.sources.new /etc/apt/sources.list.d/ubuntu.sources
+            fi
+
+            # Add arm64 repos via ubuntu-ports
+            sudo tee /etc/apt/sources.list.d/ubuntu-ports-arm64.sources > /dev/null <<'EOF'
+Types: deb
+URIs: http://ports.ubuntu.com/ubuntu-ports
+Suites: noble noble-updates noble-security noble-backports
+Components: main universe restricted multiverse
+Architectures: arm64
+Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+EOF
+
             sudo apt-get update
 
             sudo apt-get install -y --no-install-recommends \
