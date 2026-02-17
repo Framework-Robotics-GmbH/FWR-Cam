@@ -35,18 +35,19 @@ jobs:
             # Force the runner's default Ubuntu sources to amd64 only (deb822 format on 24.04 runners)
             if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
               sudo awk '
-                BEGIN { in=0 }
-                /^Types:/ { in=1 }
-                in && /^Architectures:/ { hasArch=1 }
-                in && /^$/ {
+                BEGIN { inBlock=0 }
+                /^Types:/ { inBlock=1 }
+                inBlock && /^Architectures:/ { hasArch=1 }
+                inBlock && /^$/ {
                   if ( !hasArch ) print "Architectures: amd64"
-                  in=0; hasArch=0
+                  inBlock=0; hasArch=0
                 }
                 { print }
                 END {
-                  if ( in && !hasArch ) print "Architectures: amd64"
+                  if ( inBlock && !hasArch ) print "Architectures: amd64"
                 }
-              ' /etc/apt/sources.list.d/ubuntu.sources | sudo tee /etc/apt/sources.list.d/ubuntu.sources.new > /dev/null
+              ' /etc/apt/sources.list.d/ubuntu.sources \
+              | sudo tee /etc/apt/sources.list.d/ubuntu.sources.new > /dev/null
               sudo mv /etc/apt/sources.list.d/ubuntu.sources.new /etc/apt/sources.list.d/ubuntu.sources
             fi
 
@@ -62,14 +63,19 @@ jobs:
 
             sudo apt-get update
 
+            # Host-side build tools MUST be amd64
             sudo apt-get install -y --no-install-recommends \
-              build-essential \
+              build-essential:amd64 \
+              pkg-config:amd64 \
               gcc-aarch64-linux-gnu \
-              g++-aarch64-linux-gnu \
-              pkg-config \
+              g++-aarch64-linux-gnu
+
+            # Target (arm64) development libraries only
+            sudo apt-get install -y --no-install-recommends \
               libusb-1.0-0-dev:arm64 \
               libudev-dev:arm64 \
               libv4l-dev:arm64
+
           fi
 
       - name: Configure project
