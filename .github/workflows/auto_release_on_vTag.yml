@@ -30,13 +30,17 @@ jobs:
               libusb-1.0-0-dev \
               libudev-dev
           elif [ "${{ matrix.arch }}" = "rpi-aarch64" ]; then
+            sudo dpkg --add-architecture arm64
+            sudo apt-get update
+
             sudo apt-get install -y --no-install-recommends \
               build-essential \
               gcc-aarch64-linux-gnu \
               g++-aarch64-linux-gnu \
-              libv4l-dev \
-              libusb-1.0-0-dev \
-              libudev-dev
+              pkg-config \
+              libusb-1.0-0-dev:arm64 \
+              libudev-dev:arm64 \
+              libv4l-dev:arm64
           fi
 
       - name: Configure project
