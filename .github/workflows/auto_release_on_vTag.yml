@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     strategy:
       matrix:
         arch: [native, rpi-aarch64]
@@ -20,7 +20,24 @@ jobs:
         uses: lukka/get-cmake@latest
 
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y build-essential gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libv4l-dev libusb-1.0-0-dev libudev-dev
+        run: |
+          sudo apt-get update
+
+          if [ "${{ matrix.arch }}" = "native" ]; then
+            sudo apt-get install -y --no-install-recommends \
+              build-essential \
+              libv4l-dev \
+              libusb-1.0-0-dev \
+              libudev-dev
+          elif [ "${{ matrix.arch }}" = "rpi-aarch64" ]; then
+            sudo apt-get install -y --no-install-recommends \
+              build-essential \
+              gcc-aarch64-linux-gnu \
+              g++-aarch64-linux-gnu \
+              libv4l-dev \
+              libusb-1.0-0-dev \
+              libudev-dev
+          fi
 
       - name: Configure project
         run: |
@@ -55,7 +72,7 @@ jobs:
 
   release:
     needs: build
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
